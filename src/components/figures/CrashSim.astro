@@ -1,0 +1,201 @@
+---
+import Figure from '../Figure.astro';
+import { STAGES, STAGE_LABEL } from '../../scripts/crashsim';
+---
+
+<Figure
+  label={Astro.props.label}
+  title={Astro.props.title}
+>
+  <div class="cs" data-cs>
+    <p class="cs-hint">Pick a moment and pull the plug.</p>
+
+    <ol class="cs-track">
+      {
+        STAGES.map((s, i) => (
+          <li>
+            <button type="button" class="cs-stage" data-stage={s} aria-pressed={i === 0 ? 'true' : 'false'}>
+              <span class="cs-n">{String(i + 1).padStart(2, '0')}</span>
+              <span class="cs-name">{s}</span>
+              <span class="cs-sub">{STAGE_LABEL[s]}</span>
+            </button>
+          </li>
+        ))
+      }
+    </ol>
+
+    <div class="cs-order">
+      <button type="button" class="chip" data-order aria-pressed="false">
+        reverse the order: delete the source first
+      </button>
+    </div>
+
+    <div class="cs-result" data-result></div>
+  </div>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>Rows committed</dt><dd data-r="rows">—</dd></div>
+      <div><dt>Source file</dt><dd data-r="src">—</dd></div>
+      <div><dt>Next run</dt><dd class="small" data-r="next">—</dd></div>
+      <div><dt>Verdict</dt><dd class="small" data-r="verdict">—</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={Astro.props.caption} />
+</Figure>
+
+<script>
+  import {
+    outcomeAt, outcomeIfFinalizedFirst, STAGE_LABEL, type Stage,
+  } from '../../scripts/crashsim';
+
+  function initCrash(root: HTMLElement) {
+    const resultEl = root.querySelector<HTMLElement>('[data-result]')!;
+    const orderBtn = root.querySelector<HTMLButtonElement>('[data-order]')!;
+    const figure = root.closest('figure')!;
+    const rd = (n: string) => figure.querySelector<HTMLElement>(`[data-r="${n}"]`)!;
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-stage]'));
+
+    let stage: Stage = 'claimed';
+
+    function render() {
+      const reversed = orderBtn.getAttribute('aria-pressed') === 'true';
+      const o = reversed ? outcomeIfFinalizedFirst(stage) : outcomeAt(stage);
+
+      buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.stage === stage)));
+
+      const lost = !o.rowsCommitted && !o.sourceRemains;
+      const tone = lost ? 'loss' : o.verdict === 'duplicate-window' ? 'warn' : 'ok';
+      const headline = lost
+        ? 'DATA LOST'
+        : o.verdict === 'duplicate-window'
+          ? 'DUPLICATE RISK'
+          : o.verdict === 'nothing-to-do'
+            ? 'NOTHING TO REDO'
+            : 'SAFE — RETRIED CLEANLY';
+
+      resultEl.className = `cs-result ${tone}`;
+      resultEl.innerHTML =
+        `<p class="cs-head">${headline}</p>` +
+        `<p class="cs-why">Killed while <strong>${STAGE_LABEL[stage]}</strong>. ${o.why}</p>`;
+
+      rd('rows').textContent = o.rowsCommitted ? 'yes' : 'no';
+      const src = rd('src');
+      src.textContent = o.sourceRemains ? 'still there' : 'gone';
+      src.className = lost ? 'warn' : '';
+      rd('next').textContent = o.nextRun;
+      const v = rd('verdict');
+      v.textContent = lost ? 'data loss' : o.verdict === 'duplicate-window' ? 'duplicate window' : 'safe';
+      v.className = lost || o.verdict === 'duplicate-window' ? 'small warn' : 'small';
+    }
+
+    buttons.forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = b.dataset.stage as Stage;
+        render();
+      }),
+    );
+    orderBtn.addEventListener('click', () => {
+      const on = orderBtn.getAttribute('aria-pressed') === 'true';
+      orderBtn.setAttribute('aria-pressed', String(!on));
+      orderBtn.classList.toggle('danger', !on);
+      render();
+    });
+
+    render();
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-cs]').forEach(initCrash);
+</script>
+
+<style is:global>
+  .cs { display: flex; flex-direction: column; gap: 14px; }
+
+  .cs-hint {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .cs-track {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 7px;
+  }
+  .cs-stage {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 11px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--surface);
+    cursor: pointer;
+  }
+  .cs-stage:hover { border-color: var(--muted); }
+  .cs-stage[aria-pressed='true'] {
+    border-color: var(--ch-alert);
+    background: color-mix(in srgb, var(--ch-alert) 10%, transparent);
+  }
+  .cs-n {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--muted);
+  }
+  .cs-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .cs-sub { font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+
+  .cs-order .chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .cs-order .chip[aria-pressed='true'] {
+    background: var(--ch-alert);
+    border-color: var(--ch-alert);
+    color: var(--surface);
+  }
+
+  .cs-result {
+    padding: 13px 15px;
+    border-radius: 3px;
+    border-left: 3px solid var(--ch-d);
+    background: var(--surface-2);
+  }
+  .cs-result.warn { border-left-color: var(--ch-a); }
+  .cs-result.loss { border-left-color: var(--ch-alert); }
+  .cs-head {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    margin: 0 0 6px;
+    color: var(--ch-d);
+  }
+  .cs-result.warn .cs-head { color: var(--ch-a); }
+  .cs-result.loss .cs-head { color: var(--ch-alert); }
+  .cs-why { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
+</style>

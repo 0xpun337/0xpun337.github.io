@@ -1,0 +1,167 @@
+---
+title: Finalize after commit
+deck: You cannot make "rows are durable" and "the source file is gone" atomic across a database and a filesystem. So you pick which one goes first, and you live with the window that leaves.
+series: Push Pipeline
+part: 5
+partsTotal: 6
+published: 2026-08-16
+readingMinutes: 11
+tags: [Rust, PostgreSQL, Reliability, Concurrency]
+---
+
+import CrashSim from '../../components/figures/CrashSim.astro';
+import MascotCue from '../../components/MascotCue.astro';
+
+An importer that reads files and writes rows has exactly one hard problem, and it is not throughput. It's that finishing a file means two things happening in two different systems:
+
+1. The rows are committed in Postgres.
+2. The source file is deleted from disk.
+
+There is no transaction spanning those. Whichever you do first, a hard kill in between leaves you inconsistent — and the two choices are not symmetric.
+
+## <span class="num">01</span> Pick your failure
+
+**Delete the file first.** Crash before the COPY commits and the rows never arrive. The file is gone. That data does not exist anywhere anymore. **Permanent loss.**
+
+**Commit the rows first.** Crash before the delete and the rows are in the database while the file is still on disk. Next run picks it up again and re-imports it. **A duplicate.**
+
+Duplicates are recoverable; loss is not. So the rule is **finalize after commit** — the source file is deleted or quarantined only once its rows have acked.
+
+<CrashSim
+  label="Fig. 5.1"
+  title="Kill the process at any stage"
+  caption="Pick a moment and see what state the file lands in. Every stage before the ack leaves the source in place, so the next run simply retries. Then hit <b>reverse the order</b> — the same crash points turn from a retry into permanent data loss, which is the whole argument for the ordering."
+/>
+
+Play with the reversed ordering. The point isn't that one is safe and one isn't; it's that both have a window, and only one of them has a window you can survive. <MascotCue act="watch" />
+
+## <span class="num">02</span> The window is real, and it is one stage wide
+
+Between "COPY acked" and "source deleted" there is a genuine gap where a crash produces a duplicate. Nothing in this design closes it, because nothing can — that would need a distributed transaction across Postgres and ext4.
+
+<p class="note"><b>Don't pretend otherwise</b>A system that claims exactly-once across two unrelated systems is either lying or has quietly redefined "once".</p>
+
+What you can do is make the window small and make the duplicate cheap. Small, because the delete is enqueued the instant the ack lands. Cheap, because business-level de-duplication catches the re-import and drops the rows it has already seen, counted as `duplicate_drops` rather than silently swallowed.
+
+And it is exactly why the shutdown drain from [part 1](/writing/two-runtimes-one-pipeline/) has no timeout. A timeout during shutdown would deliberately park the process in this window, every single time, on purpose.
+
+## <span class="num">03</span> Which acks is this file waiting for?
+
+A single file can write rows into a dozen tables. It is finished only when *all* the COPYs it contributed to have committed — not the first, not most.
+
+Each table gets a stable bit:
+
+```rust
+mod table_bit {
+    pub(super) const FILE_DETAILS: u16 = 1 << 0;
+    pub(super) const FAIL_FILE_DETAILS: u16 = 1 << 1;
+    pub(super) const HISTORY_BILL: u16 = 1 << 2;
+    // ...fourteen of them
+}
+```
+
+As a file's rows are dispatched, the tables it touched accumulate into a `u16` mask. When a flush starts, the tables actually flushed produce another mask. A file may finalize when its mask is fully covered by acked bits.
+
+<p class="note"><b>The coupling to watch</b>The same table must map to the same bit in both places. Get that wrong and files finalize while waiting on a COPY that never included them — a bug that only appears under a specific mix of push types.</p>
+
+Sixteen bits and a bitwise AND, rather than a set per file. At the rate files move through, a `HashSet<TableId>` per file would be an allocation per file for information that fits in a register.
+
+## <span class="num">04</span> Don't block intake on the database
+
+The naive writer flushes and waits. That produces a sawtooth: parse a batch, stall on the COPY, parse another. The CPU pool idles while the database works, then the database idles while the CPU pool works.
+
+The fix is to let flushes overlap with parsing:
+
+```rust
+let mut inflight: Inflight = FuturesUnordered::new();
+```
+
+`start_flush` issues the COPYs, builds a future that awaits their acks and finalizes that batch's files, and pushes it onto `inflight`. Then the loop goes straight back to accepting records. In-flight futures are driven by the same `select!` that receives them:
+
+```rust
+Some(()) = inflight.next(), if !inflight.is_empty() => {}
+```
+
+The comment in the source calls the thing this avoids *"mountains + gap"*, which is exactly what it looks like on a throughput graph.
+
+Overlap without a bound is just a different way to fall over, so:
+
+```rust
+const MAX_INFLIGHT_FLUSHES: usize = 4;
+
+async fn drain_to_inflight_cap(&mut self, inflight: &mut Inflight) {
+    while inflight.len() >= MAX_INFLIGHT_FLUSHES {
+        if inflight.next().await.is_none() { break; }
+    }
+}
+```
+
+Four concurrent flushes. At the cap the writer *awaits* a completion before starting another, which is backpressure arriving from the database side — the same mechanism as [part 1](/writing/two-runtimes-one-pipeline/), applied at the other end of the pipeline.
+
+## <span class="num">05</span> Two details in the flush trigger
+
+A batch flushes on size or on age, and both are less obvious than they look.
+
+**Size is measured in bytes, not rows.**
+
+```rust
+self.total_buffered_bytes = total_buffered_bytes(&self.buffers);
+```
+
+That's the real PGCOPY payload size, not a row count standing in for it. Rows vary enormously between tables — a registration row and a load-survey row are not comparable — so a row threshold means the actual flush size swings by an order of magnitude depending on the mix.
+
+**The age clock starts at the first record, not at process start.**
+
+```rust
+let mut batch_started: Option<tokio::time::Instant> = None;
+```
+
+Armed when the first record lands in an empty buffer, cleared on every flush. So `flush_interval` genuinely means *the longest any record waits*. A clock running since startup would fire partway through the first batch and flush a nearly empty one.
+
+And when there's no batch accumulating, the timer doesn't exist at all:
+
+```rust
+let flush_deadline = async {
+    match batch_started {
+        Some(started) => tokio::time::sleep_until(started + flush_interval).await,
+        None => std::future::pending::<()>().await,
+    }
+};
+```
+
+`std::future::pending()` never resolves, so that `select!` arm can never fire on an empty buffer. The alternative — a timer that wakes every interval and finds nothing to do — is a background wakeup burning power forever on an idle service.
+
+<p class="note"><b>Small thing, real effect</b>This is a 365-day process. A pointless wakeup every few seconds is millions of them a year.</p>
+
+## <span class="num">06</span> Shutdown refuses to start work
+
+The most counter-intuitive rule: once shutdown is requested, the writer will **not** flush what it has buffered.
+
+```rust
+// Graceful shutdown contract: do NOT flush the remaining buffers — nothing new
+// goes to the DB once shutdown is requested. Only drain the already-issued
+// COPYs' finalizers to completion, so files whose rows ARE committed get their
+// source deleted/moved (no duplicate reprocessing). Buffered-but-unflushed
+// records keep their source files and are safely reprocessed on the next run.
+while inflight.next().await.is_some() {}
+```
+
+Flushing on the way out feels like the tidy thing to do. It is the risky thing to do. A flush issued during shutdown is a new COPY that may not finish, in a process that is being torn down, and a partially-written batch is precisely the state you cannot recover from cleanly.
+
+Buffered rows are not durable and their source files were never finalized — so dropping them costs nothing. The files are still there. The next run redoes that work from a known state.
+
+Even a record received mid-shutdown is dropped rather than processed. Its file stays claimed and reappears next run. Never half-written.
+
+<p class="note"><b>The general shape</b>On the way down, finish what you started and start nothing new. "Try to squeeze in a bit more" is how shutdown paths become the least-tested, most dangerous code in a service.</p>
+
+## <span class="num">07</span> What this buys
+
+None of this is exotic. It's an ordering rule, a bitmask, a bounded queue of futures, and a shutdown path that does less than you'd expect.
+
+What it produces is a service where the answer to *"it got killed mid-batch, what now?"* is **start it again**. Not a recovery script, not a manual reconciliation. The file is either still there and gets redone, or it's gone because its rows are safely in the database.
+
+The exception is that one stage-wide window, and being able to say precisely where it is — and what happens in it — is worth more than a claim of exactly-once that doesn't survive contact with a power cut.
+
+---
+
+One more to go: the optimisation diary — criterion, flamegraphs, and which changes actually moved the needle.
