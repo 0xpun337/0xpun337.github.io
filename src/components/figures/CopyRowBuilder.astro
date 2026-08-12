@@ -1,0 +1,286 @@
+---
+import Figure from '../Figure.astro';
+
+interface Props {
+  label: string;
+  title: string;
+  caption: string;
+}
+
+const { label, title, caption } = Astro.props;
+---
+
+<Figure label={label} title={title}>
+  <div class="crb" data-crb>
+    <p class="crb-schema">
+      <span>reading_at</span> timestamptz ·
+      <span>phase</span> int2 ·
+      <span>serial</span> text ·
+      <span>energy</span> float8 ·
+      <span>valid</span> bool
+    </p>
+
+    <div class="crb-controls">
+      <label class="crb-f">
+        <span>serial (text)</span>
+        <input type="text" data-serial value="MTR-4417" spellcheck="false" autocomplete="off" />
+      </label>
+      <label class="crb-f">
+        <span>phase (int2)</span>
+        <input type="number" data-phase value="3" min="-32768" max="32767" />
+      </label>
+      <div class="crb-toggles">
+        <button type="button" class="chip" data-nullify aria-pressed="false">energy = NULL</button>
+        <button type="button" class="chip danger" data-injectnul aria-pressed="false">inject NUL byte</button>
+        <button type="button" class="chip" data-strip aria-pressed="true">strip NUL</button>
+      </div>
+    </div>
+
+    <div class="crb-alert" data-alert hidden></div>
+
+    <div class="crb-bytes" data-bytes aria-live="polite"></div>
+
+    <p class="crb-legend">
+      <i class="r-sig"></i>signature
+      <i class="r-flags"></i>flags
+      <i class="r-count"></i>field count
+      <i class="r-len"></i>length
+      <i class="r-data"></i>data
+      <i class="r-trailer"></i>trailer
+    </p>
+
+    <p class="crb-hover" data-hover>hover a byte</p>
+  </div>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>Stream size</dt><dd data-r="size">0 B</dd></div>
+      <div><dt>Overhead</dt><dd data-r="oh">0 B</dd></div>
+      <div><dt>NUL in text</dt><dd data-r="nul">no</dd></div>
+      <div><dt>Postgres</dt><dd class="small" data-r="verdict">accepts</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={caption} />
+</Figure>
+
+<script>
+  import { encodeRows, hasNulInText, type Value, type Span } from '../../scripts/copybinary';
+
+  const NUL = String.fromCharCode(0);
+  const COLUMNS = ['reading_at', 'phase', 'serial', 'energy', 'valid'];
+
+  function initBuilder(root: HTMLElement) {
+    const q = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const serialIn = q<HTMLInputElement>('[data-serial]');
+    const phaseIn = q<HTMLInputElement>('[data-phase]');
+    const nullBtn = q<HTMLButtonElement>('[data-nullify]');
+    const nulBtn = q<HTMLButtonElement>('[data-injectnul]');
+    const stripBtn = q<HTMLButtonElement>('[data-strip]');
+    const bytesEl = q<HTMLElement>('[data-bytes]');
+    const alertEl = q<HTMLElement>('[data-alert]');
+    const hoverEl = q<HTMLElement>('[data-hover]');
+    const figure = root.closest('figure')!;
+    const rd = (n: string) => figure.querySelector<HTMLElement>(`[data-r="${n}"]`)!;
+
+    const pressed = (b: HTMLButtonElement) => b.getAttribute('aria-pressed') === 'true';
+    const toggle = (b: HTMLButtonElement) => {
+      b.setAttribute('aria-pressed', String(!pressed(b)));
+      render();
+    };
+    [nullBtn, nulBtn, stripBtn].forEach((b) => b.addEventListener('click', () => toggle(b)));
+    serialIn.addEventListener('input', render);
+    phaseIn.addEventListener('input', render);
+
+    function render() {
+      let serial = serialIn.value;
+      if (pressed(nulBtn)) {
+        const at = Math.min(3, serial.length);
+        serial = serial.slice(0, at) + NUL + serial.slice(at);
+      }
+
+      const row: Value[] = [
+        { kind: 'timestamptz', unixMs: Date.UTC(2026, 7, 14, 9, 30, 0) },
+        { kind: 'int2', v: Number(phaseIn.value) || 0 },
+        { kind: 'text', v: serial },
+        pressed(nullBtn) ? { kind: 'null' } : { kind: 'float8', v: 41.735 },
+        { kind: 'bool', v: true },
+      ];
+
+      const stripNul = pressed(stripBtn);
+      const enc = encodeRows(COLUMNS, [row], { stripNul });
+
+      const spanAt = new Array<Span | null>(enc.bytes.length).fill(null);
+      for (const s of enc.spans) {
+        for (let i = s.start; i < s.end; i++) spanAt[i] = s;
+      }
+
+      bytesEl.innerHTML = '';
+      enc.bytes.forEach((b, i) => {
+        const sp = spanAt[i];
+        const cell = document.createElement('span');
+        const isNul = b === 0 && sp?.role === 'data';
+        cell.className = `crbb r-${sp?.role ?? 'none'}${isNul && !stripNul ? ' bad' : ''}`;
+        cell.textContent = b.toString(16).padStart(2, '0');
+        cell.addEventListener('mouseenter', () => {
+          hoverEl.textContent = sp ? `@${i}  ${sp.label} — ${sp.detail}` : `@${i}`;
+        });
+        bytesEl.appendChild(cell);
+      });
+
+      const carriesNul = hasNulInText([row]) && !stripNul;
+      alertEl.hidden = !carriesNul;
+      if (carriesNul) {
+        alertEl.textContent =
+          'SQLSTATE 22021 — invalid byte sequence for encoding. Postgres aborts the entire COPY, taking every other row in this batch with it.';
+      }
+
+      // Overhead = everything that is not field payload.
+      const payload = enc.spans
+        .filter((s) => s.role === 'data')
+        .reduce((a, s) => a + (s.end - s.start), 0);
+
+      rd('size').textContent = enc.bytes.length + ' B';
+      rd('oh').textContent = enc.bytes.length - payload + ' B';
+      const nulEl = rd('nul');
+      nulEl.textContent = hasNulInText([row]) ? (stripNul ? 'stripped' : 'yes') : 'no';
+      nulEl.className = carriesNul ? 'warn' : '';
+      const v = rd('verdict');
+      v.textContent = carriesNul ? 'aborts the batch' : 'accepts';
+      v.className = carriesNul ? 'small warn' : 'small';
+    }
+
+    render();
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-crb]').forEach(initBuilder);
+</script>
+
+<style is:global>
+  .crb { display: flex; flex-direction: column; gap: 14px; }
+
+  .crb-schema {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.7;
+  }
+  .crb-schema span { color: var(--ink); font-weight: 700; }
+
+  .crb-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 18px;
+    align-items: flex-end;
+  }
+  .crb-f { display: flex; flex-direction: column; gap: 6px; }
+  .crb-f > span {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .crb-f input {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--ink);
+    width: 160px;
+  }
+  .crb-toggles { display: flex; flex-wrap: wrap; gap: 7px; }
+  .crb .chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .crb .chip[aria-pressed='true'] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .crb .chip.danger[aria-pressed='true'] {
+    background: var(--ch-alert);
+    border-color: var(--ch-alert);
+    color: var(--surface);
+  }
+
+  .crb-alert {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    padding: 11px 13px;
+    border-radius: 3px;
+    border-left: 3px solid var(--ch-alert);
+    background: color-mix(in srgb, var(--ch-alert) 12%, transparent);
+    color: var(--ch-alert);
+  }
+  .crb-alert[hidden] { display: none; }
+
+  .crb-bytes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .crbb {
+    padding: 5px 6px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+  .crbb.r-sig     { background: color-mix(in srgb, var(--ch-c) 24%, transparent); color: var(--ch-c); }
+  .crbb.r-flags,
+  .crbb.r-ext     { background: var(--surface-2); color: var(--muted); }
+  .crbb.r-count   { background: color-mix(in srgb, var(--ch-a) 26%, transparent); color: var(--ch-a); }
+  .crbb.r-len     { background: color-mix(in srgb, var(--ch-b) 22%, transparent); color: var(--ch-b); }
+  .crbb.r-data    { background: color-mix(in srgb, var(--ch-d) 20%, transparent); color: var(--ch-d); }
+  .crbb.r-trailer { background: color-mix(in srgb, var(--ch-c) 24%, transparent); color: var(--ch-c); }
+  .crbb.bad {
+    background: var(--ch-alert);
+    color: var(--surface);
+    font-weight: 700;
+  }
+
+  .crb-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+  .crb-legend i {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px;
+  }
+  .crb-legend i.r-sig     { background: var(--ch-c); }
+  .crb-legend i.r-flags   { background: var(--rule); }
+  .crb-legend i.r-count   { background: var(--ch-a); }
+  .crb-legend i.r-len     { background: var(--ch-b); }
+  .crb-legend i.r-data    { background: var(--ch-d); }
+  .crb-legend i.r-trailer { background: var(--ch-c); }
+
+  .crb-hover {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    margin: 0;
+    min-height: 1.5em;
+  }
+</style>

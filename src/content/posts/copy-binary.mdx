@@ -1,0 +1,150 @@
+---
+title: Hand-rolling PostgreSQL COPY BINARY
+deck: Text COPY makes Postgres parse everything you just finished formatting. The binary protocol skips both halves of that round trip — and hands you one very sharp edge.
+series: Push Pipeline
+part: 4
+partsTotal: 6
+published: 2026-08-15
+readingMinutes: 11
+tags: [Rust, PostgreSQL, Binary formats]
+---
+
+import CopyRowBuilder from '../../components/figures/CopyRowBuilder.astro';
+import MascotCue from '../../components/MascotCue.astro';
+
+There are three ways to get a million rows into Postgres, and the difference between them is not the network.
+
+**Multi-row `INSERT`.** The server parses SQL, plans, and executes. Batching helps, but you are still asking a query planner to think about data you already know the shape of.
+
+**Text `COPY`.** No planner. But you format every value to a string, and the server parses every string back into a value. You wrote `41.735`, Postgres runs a float parser on it. Two conversions per field that cancel out.
+
+**Binary `COPY`.** You send the bytes the server already wanted. No formatting, no parsing — a length and a value, in network byte order.
+
+The third one is a wire format rather than an API, which means writing it yourself. It is about two hundred lines, and most of that is a match statement.
+
+## <span class="num">01</span> The whole format
+
+```text
+header  : "PGCOPY\n\xff\r\n\0"   11 bytes
+          int32 flags            0
+          int32 header ext len   0
+tuple   : int16 field count
+          per field:
+            int32 length         (-1 means NULL)
+            <length> bytes
+trailer : int16 -1
+```
+
+That is all of it. An empty stream — header then trailer, no rows — is exactly 21 bytes, which makes a satisfying first test:
+
+```rust
+#[test]
+fn empty_stream_is_21_bytes() {
+    let mut buf = BytesMut::new();
+    write_header(&mut buf);
+    write_trailer(&mut buf);
+    assert_eq!(buf.len(), 21);
+    assert_eq!(&buf[0..11], b"PGCOPY\n\xFF\r\n\0");
+}
+```
+
+<p class="note"><b>Why the odd signature</b>The <code>\r\n</code> and <code>\0</code> are a trap for transfer software that mangles line endings or truncates at NUL. If something rewrote your stream in transit, the signature no longer matches and Postgres refuses it rather than importing garbage.</p>
+
+Build a row and watch the bytes assemble:
+
+<CopyRowBuilder
+  label="Fig. 4.1"
+  title="One tuple, byte by byte"
+  caption="Hover any byte for what it is. Change the serial or the phase and watch only the affected field move. <b>energy = NULL</b> shows the -1 length with no payload following it. The last two toggles reproduce a bug that reached production — read on."
+/>
+
+Note the shape of the overhead: four bytes of length per field, two per tuple, and nothing else. No delimiters, no quoting, no escaping — because nothing needs escaping when every field carries its own length.
+
+## <span class="num">02</span> The type has to be exactly right
+
+The binary protocol does not negotiate. `int2` is two bytes, `int4` is four, and if you send four where the column wants two, Postgres does not helpfully coerce — it reads the wrong number of bytes and everything after that is misaligned.
+
+So the encoder refuses to guess:
+
+```rust
+pub(crate) enum BinaryColumnValue {
+    Null,
+    Boolean(bool),
+    Smallint(i16),
+    Integer(i32),
+    Bigint(i64),
+    DoublePrecision(f64),
+    Text(String),
+    Timestamp(i64),
+}
+```
+
+The caller declares the intended Postgres type at the mapping layer. There is no inference from the Rust type, because the Rust type is not the authority — the column is. An `i64` in your struct might be a `bigint` column or an `int4` one, and only the schema knows.
+
+<p class="note"><b>What "wrong" looks like</b>Not an error. A row that imports with plausible-looking wrong values, or a stream that fails several rows later with something unrelated. Type mistakes here are diagnosed by staring at hex.</p>
+
+That's also why the writer does a schema preflight on startup: it reads the column types out of the catalog and refuses to run if the registry disagrees. Better to fail at boot than to discover a width mismatch at three in the morning.
+
+## <span class="num">03</span> Timestamps do not start in 1970
+
+```rust
+pub(crate) const POSTGRES_EPOCH_DAYS_FROM_UNIX: i64 = 10_957;
+pub(crate) const POSTGRES_EPOCH_SECS_FROM_UNIX: i64 =
+    POSTGRES_EPOCH_DAYS_FROM_UNIX * 86_400;
+```
+
+A `timestamptz` on the wire is an `int64` of **microseconds since 2000-01-01 00:00:00 UTC**. Send Unix microseconds instead and every row lands thirty years late, with no error whatsoever, because both numbers are perfectly valid timestamps.
+
+10,957 is 30 × 365 + 8 leap days. Worth writing as a named constant with the arithmetic in the comment, because a reviewer will want to check it and a magic `946684800` invites nobody to.
+
+<p class="note"><b>The class of bug</b>An off-by-thirty-years is invisible in unit tests that round-trip through your own code — encode and decode share the mistake and agree perfectly. It only shows up against a real database.</p>
+
+The parser feeding it is hand-written too, walking ASCII digits directly rather than going through a general-purpose date library. Not because parsing dates is fun, but because it sits on the per-row path and a general parser does far more work than reading fourteen digits at known offsets.
+
+## <span class="num">04</span> The NUL byte that takes down the batch
+
+This one shipped, and it is the reason the figure above has a red button.
+
+PostgreSQL `text` **cannot store a NUL byte**. Not "escapes it", not "truncates" — the value is rejected with SQLSTATE `22021`, *invalid byte sequence for encoding*. In a normal `INSERT` that fails one row. In a `COPY`, it aborts **the entire stream**, and every other row in that batch goes with it.
+
+Toggle **inject NUL byte** in Fig 4.1 with stripping off. One byte, in one field, in one row — and thousands of unrelated rows fail. <MascotCue act="devour" />
+
+Where does a NUL even come from? Not from anything anyone typed. It comes from fixed-width fields in binary payloads: a device identifier declared as 16 bytes, holding 8 bytes of identifier and 8 bytes of NUL padding. Decode that to a string and the padding comes along.
+
+```rust
+// PostgreSQL text/varchar physically cannot store a NUL byte (0x00):
+// a COPY carrying one aborts the ENTIRE batch with SQLSTATE 22021,
+// taking every other row down with it. NUL only ever reaches here as
+// fixed-width padding on a payload-derived string, never as meaningful
+// text, so strip it. The common path has no NUL and pays only a cheap
+// scan, no allocation.
+let bytes = s.as_bytes();
+if bytes.contains(&0) {
+    let cleaned: Vec<u8> = bytes.iter().copied().filter(|&b| b != 0).collect();
+    buf.put_i32(cleaned.len() as i32);
+    buf.extend_from_slice(&cleaned);
+} else {
+    buf.put_i32(bytes.len() as i32);
+    buf.extend_from_slice(bytes);
+}
+```
+
+The branch is the interesting part. The common path — no NUL — does a `memchr`-style scan and then writes the original bytes with **no allocation at all**. Only the rare path allocates, and only for the string that actually needed fixing.
+
+<p class="note"><b>Sanitise at the boundary</b>This belongs in the encoder, not at every call site. One place where bytes become a Postgres value is one place to get it right.</p>
+
+The general lesson is about blast radius. A per-row failure mode is an annoyance you handle with a retry. The same failure inside a batched, all-or-nothing operation is an outage. When you move from `INSERT` to `COPY` you are also moving every value-level error from row-scoped to batch-scoped, and the validation has to move with it.
+
+## <span class="num">05</span> Why hand-roll instead of using a crate
+
+Crates exist. The reason not to use one here is ownership of the buffer.
+
+The encoder writes directly into the same `BytesMut` that goes on the wire. There is no intermediate row struct, no `Vec<Box<dyn ToSql>>`, no per-value allocation on the way out. Rows accumulate into a per-table buffer and that buffer is what gets flushed — the bytes are written once and never copied.
+
+That matters because of where this sits: the encode step runs on the Rayon pool from [part 1](/writing/two-runtimes-one-pipeline/), and every allocation there is contention on an allocator that eight pinned threads are hammering simultaneously. A generic API that allocates per value is fine at a hundred rows a second and is the bottleneck at a hundred thousand.
+
+The module knows nothing about the importer, either — no tables, no column maps, no domain types. It takes `BinaryColumnValue` and produces bytes. Everything domain-specific lives in the mapping layer above it, which is what made it testable byte-for-byte against the format spec rather than against the application.
+
+---
+
+Next: pipelined flushing, one connection per table, and the finalize-after-commit rule that makes a crash mid-batch a non-event.
