@@ -1,0 +1,83 @@
+/* Design tokens.
+   Three blocks, in this order, and nothing else lives in this file:
+     1. bare :root                     — the complete light palette
+     2. prefers-color-scheme: dark     — dark, unless the reader chose light
+     3. :root[data-theme="dark"]       — an explicit dark choice wins outright
+
+   The channel palette is data encoding, not decoration: each pipeline stage
+   owns a hue and it means the same thing in every figure on the site. */
+
+:root {
+  --ground:     #EDEFF3;
+  --surface:    #FFFFFF;
+  --surface-2:  #F5F7FA;
+  --ink:        #14171D;
+  --ink-2:      #3D4453;
+  --muted:      #6B7484;
+  --rule:       #D5DAE3;
+  --rule-soft:  #E4E8EF;
+
+  --ch-scan:    #C4611C;
+  --ch-io:      #1E5FA8;
+  --ch-cpu:     #6B4BA8;
+  --ch-db:      #17795E;
+  --ch-stall:   #B32B2B;
+
+  --accent:     var(--ch-io);
+  --accent-ink: #FFFFFF;
+
+  --shadow: 0 1px 2px rgba(20, 23, 29, .06), 0 8px 24px rgba(20, 23, 29, .06);
+
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Source Serif 4", Georgia, "Times New Roman", serif;
+
+  --measure: 68ch;
+  --margin-col: 230px;
+  --wide: 1080px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:    #0E1116;
+    --surface:   #151920;
+    --surface-2: #1B212A;
+    --ink:       #E4E8EE;
+    --ink-2:     #B6BECB;
+    --muted:     #838D9C;
+    --rule:      #29313D;
+    --rule-soft: #1F262F;
+
+    --ch-scan:  #E08A45;
+    --ch-io:    #5B9BE0;
+    --ch-cpu:   #A489E8;
+    --ch-db:    #35B394;
+    --ch-stall: #E06B6B;
+
+    --accent:     var(--ch-io);
+    --accent-ink: #0E1116;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:    #0E1116;
+  --surface:   #151920;
+  --surface-2: #1B212A;
+  --ink:       #E4E8EE;
+  --ink-2:     #B6BECB;
+  --muted:     #838D9C;
+  --rule:      #29313D;
+  --rule-soft: #1F262F;
+
+  --ch-scan:  #E08A45;
+  --ch-io:    #5B9BE0;
+  --ch-cpu:   #A489E8;
+  --ch-db:    #35B394;
+  --ch-stall: #E06B6B;
+
+  --accent:     var(--ch-io);
+  --accent-ink: #0E1116;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
+}

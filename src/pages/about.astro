@@ -1,0 +1,42 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base
+  title="About — 0xpun337"
+  description="Puneet Mishra. Rust, Linux, and databases under load."
+>
+  <article>
+    <div class="wrap">
+      <div class="col">
+        <p class="eyebrow">About</p>
+        <h1>Puneet Mishra</h1>
+        <p class="deck">
+          I write about the parts of systems work that don't fit in a commit message.
+        </p>
+
+        <p>
+          Most of what shows up here comes out of building high-throughput ingest
+          services in Rust — pipelines that decode binary protocol frames and load
+          them into PostgreSQL, at rates where every allocation and every syscall
+          starts to matter.
+        </p>
+
+        <p>
+          The posts describe <strong>techniques</strong>, not products. Where a
+          technique came out of professional work, the engineering is the subject
+          and the business context is left out entirely. Every figure and every
+          benchmark on this site is reproduced on synthetic data generated for
+          that purpose, so the numbers are mine to publish.
+        </p>
+
+        <p class="note"><b>Protocols</b>DLMS/COSEM appears throughout. It is a published open standard — IEC 62056 — so nothing about parsing it is anyone's secret.</p>
+
+        <p>
+          Find me on <a href="https://github.com/0xpun337">GitHub</a>, or subscribe
+          via <a href="/rss.xml">RSS</a>.
+        </p>
+      </div>
+    </div>
+  </article>
+</Base>

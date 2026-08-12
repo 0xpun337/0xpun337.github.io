@@ -1,0 +1,106 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+
+const posts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
+  (a, b) => a.data.part - b.data.part,
+);
+
+const series = [...new Set(posts.map((p) => p.data.series))];
+---
+
+<Base
+  title="0xpun337 — systems engineering notes"
+  description="Notes on Rust, Linux syscalls, and getting data into PostgreSQL faster than it wants to go."
+>
+  <article>
+    <div class="wrap">
+      <div class="col">
+        <p class="eyebrow">Writing</p>
+        <h1>Systems engineering notes</h1>
+        <p class="deck">
+          Rust, Linux syscalls, and getting data into PostgreSQL faster than it wants to go.
+        </p>
+
+        {
+          series.map((name) => (
+            <>
+              <h2>{name}</h2>
+              <ul class="index">
+                {posts
+                  .filter((p) => p.data.series === name)
+                  .map((p) => (
+                    <li>
+                      <a href={`/writing/${p.id}/`}>
+                        <span class="part">{String(p.data.part).padStart(2, '0')}</span>
+                        <span class="body">
+                          <strong>{p.data.title}</strong>
+                          <span class="sub">{p.data.deck}</span>
+                          <span class="meta">
+                            {p.data.tags.join(' · ')} — {p.data.readingMinutes} min
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ))
+        }
+      </div>
+    </div>
+  </article>
+</Base>
+
+<style>
+  .index {
+    display: flex;
+    flex-direction: column;
+  }
+  .index a {
+    display: grid;
+    grid-template-columns: 3ch 1fr;
+    gap: 18px;
+    padding-block: 18px;
+    border-top: 1px solid var(--rule-soft);
+    text-decoration: none;
+    color: inherit;
+  }
+  .index li:last-child a {
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .index a:hover strong {
+    color: var(--accent);
+  }
+  .part {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    padding-top: 6px;
+  }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .body strong {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .sub {
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--ink-2);
+    text-wrap: pretty;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+</style>

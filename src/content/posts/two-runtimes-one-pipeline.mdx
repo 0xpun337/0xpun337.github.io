@@ -1,0 +1,78 @@
+---
+title: Two runtimes, one pipeline
+deck: Tokio owns the I/O. Rayon owns the CPU. Almost nobody talks about the seam between them — which is where all the interesting engineering actually lives.
+series: Push Pipeline
+part: 1
+partsTotal: 6
+published: 2026-08-12
+readingMinutes: 8
+tags: [Rust, Tokio, Rayon]
+---
+
+import PipelineFigure from '../../components/figures/PipelineFigure.astro';
+
+The obvious build is everything on Tokio. Read the file with `tokio::fs`, decrypt it in the same task, encode the rows, hand them to the driver. One runtime, one mental model.
+
+It has a specific failure mode. Decryption and parsing are pure CPU work measured in *milliseconds*. Drop a millisecond of AES-GCM onto a Tokio worker and you've blocked a reactor that was meant to service hundreds of sockets. Do it on every worker at once and the async runtime stops being a runtime — it's an expensive thread pool with a scheduler you don't control.
+
+<p class="note"><b>The rule</b>A future that computes is a future that lies. It promises to yield, then doesn't.</p>
+
+So: **two runtimes, deliberately kept apart.** Tokio takes everything that waits — directory scans, file reads, the Postgres connection. Rayon takes everything that computes, on a pool pinned to specific cores.
+
+<p class="note"><b>Why pin</b>An unpinned worker can be migrated mid-decrypt, arriving on a core whose L2 knows nothing about its working set. You pay for the move twice.</p>
+
+`spawn_blocking` is the usual answer here, and for file reads it's the right one — those are genuine syscalls that block and then return. It's the wrong answer for sustained CPU work. That pool is unbounded by design, so a burst of decode jobs spawns a burst of threads, and now you're oversubscribed against the cores actually doing the work. Rayon's pool is fixed-size and work-stealing, which is what you want when the job queue is deep and every job is the same shape.
+
+## <span class="num">01</span> Backpressure is the whole design
+
+Every stage hands work forward through a **bounded** channel, and the bound isn't a tuning detail — it's the mechanism. The database slows, the writer's queue fills, the encoder blocks pushing into it. That block walks backwards stage by stage until it reaches the scanner, which stops claiming files off disk.
+
+<p class="note"><b>No controller</b>Nothing measures load. Nothing decides. The stall <em>is</em> the signal, and it travels for free.</p>
+
+Drag the sliders and watch it travel upstream:
+
+<PipelineFigure
+  label="Fig. 1.1"
+  title="Backpressure propagation across a bounded five-stage pipeline"
+  caption="Each stage runs on its own runtime — <b>scanner and reader on Tokio's blocking pool</b>, <b>decode and encode on the core-pinned Rayon pool</b>, <b>COPY on the async reactor</b>. The strip below is a logic-analyser view: solid means the stage is doing work, red means it is blocked on a full downstream queue."
+/>
+
+Two things worth trying. Starve the database and the red marches leftwards until `SCAN` stops — that's the pipeline refusing to read work it can't finish. Then raise the queue depth: throughput doesn't improve, latency just gets worse. Deep queues don't add capacity, they only hide the fact that you don't have any.
+
+## <span class="num">02</span> The bridge
+
+Handing work from an async task to a Rayon pool is where implementations quietly go wrong. You can't `await` inside Rayon and you mustn't block inside Tokio, so the bridge is explicit: the job crosses on a channel with a `oneshot::Sender` riding along to carry the answer back.
+
+```rust
+// Async side: hand the CPU job across, then await the answer.
+let (tx, rx) = oneshot::channel();
+cpu_tx.send(DecodeJob { envelope, reply: tx })?;
+
+// The reactor thread is free the whole time this is pending —
+// no AES, no parsing, nothing that computes ever runs here.
+let parsed = rx.await.map_err(|_| Error::CpuPoolGone)??;
+
+// Rayon side: pure CPU, pinned core, zero awareness of async.
+pool.spawn(move || {
+    let out = decrypt_and_parse(&job.envelope);
+    let _ = job.reply.send(out); // receiver dropped = caller cancelled
+});
+```
+
+The double `?` on that await isn't a typo. The outer catches *the pool died*, the inner catches *the job failed*.
+
+<p class="note"><b>Don't collapse these</b>One error type for both is how you end up unable to tell a corrupt payload from a panicked worker at 3am.</p>
+
+Note the `let _ =` on the send. If the caller timed out and dropped its receiver, the send fails, and that's fine — the work is already done and nobody wants it. Treating that as an error means logging a scary line every time a client disconnects.
+
+## <span class="num">03</span> The invariant that makes it safe
+
+A bounded pipeline needs to know how much work is in it. One atomic counter, `in_flight`, incremented when the scanner claims a file and decremented when that file reaches a terminal state. The scanner's admission budget is `queue_size - in_flight`.
+
+The rule is unglamorous and absolute: **every path decrements exactly once.** Not the happy path — *every* path. File vanished before the read? Decrement. Hex payload malformed? Decrement. Decode panicked? Decrement. Miss one and the counter ratchets upward; the budget shrinks to zero; the pipeline goes quiet while doing nothing wrong that any log will show you.
+
+<p class="note"><b>How this fails</b>Silently, hours later, under load. There's no error — the scanner just admits less and less until it admits nothing.</p>
+
+The fix that actually holds is structural: route every failure through the same terminal disposition that the success path uses, so there is exactly one place the decrement can happen. If an error arm has to remember to decrement, eventually one won't.
+
+Next in this series: `getdents64`, and why `std::fs::read_dir` is doing more work than you asked it to.

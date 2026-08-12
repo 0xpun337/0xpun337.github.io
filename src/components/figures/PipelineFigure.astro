@@ -1,0 +1,305 @@
+---
+import Figure from '../Figure.astro';
+
+/** Interactive backpressure simulation. Reused across posts with different
+ *  presets — pass different depth/drain/workers rather than forking it. */
+interface Props {
+  label: string;
+  title: string;
+  caption: string;
+  /** Bound on every inter-stage queue. */
+  depth?: number;
+  /** Database drain rate in tenths of an item/sec (90 = 9.0/s). */
+  drain?: number;
+  /** Rayon pool size. */
+  workers?: number;
+}
+
+const { label, title, caption, depth = 12, drain = 90, workers = 4 } = Astro.props;
+---
+
+<Figure label={label} title={title}>
+  <canvas
+    data-pipe
+    height="330"
+    data-depth={depth}
+    data-drain={drain}
+    data-workers={workers}
+    aria-label="Animated diagram of a five-stage pipeline. Each stage feeds a bounded queue; when the database drain rate falls, the queues saturate and stalls propagate upstream until the scanner stops claiming files."
+  ></canvas>
+
+  <Fragment slot="controls">
+    <div class="controls">
+      <div class="ctl">
+        <div class="ctl-top"><span>Queue depth</span><output data-out="depth">{depth}</output></div>
+        <input type="range" data-in="depth" min="2" max="40" value={depth} aria-label="Queue depth" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-top"><span>DB drain rate</span><output data-out="drain">{(drain / 10).toFixed(1)}/s</output></div>
+        <input type="range" data-in="drain" min="10" max="200" value={drain} aria-label="Database drain rate" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-top"><span>Rayon workers</span><output data-out="workers">{workers}</output></div>
+        <input type="range" data-in="workers" min="1" max="12" value={workers} aria-label="Rayon worker count" />
+      </div>
+      <button class="btn" type="button" data-toggle>Pause</button>
+    </div>
+  </Fragment>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>Throughput</dt><dd data-r="tp">0.0/s</dd></div>
+      <div><dt>Scanner stalled</dt><dd data-r="stall">0%</dd></div>
+      <div><dt>In flight</dt><dd data-r="inflight">0</dd></div>
+      <div><dt>Bottleneck</dt><dd data-r="neck">—</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={caption} />
+</Figure>
+
+<script>
+  import { STAGES, initState, rateOf, step, type SimParams } from '../../scripts/pipeline-sim';
+
+  const TRACE = 90;
+  const HEIGHT = 330;
+
+  function initPipe(canvas: HTMLCanvasElement) {
+    const root = canvas.closest('figure');
+    if (!root) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const q = <T extends Element>(sel: string) => root.querySelector<T>(sel);
+    const input = (n: string) => q<HTMLInputElement>(`[data-in="${n}"]`)!;
+    const out = (n: string) => q<HTMLOutputElement>(`[data-out="${n}"]`)!;
+    const readout = (n: string) => q<HTMLElement>(`[data-r="${n}"]`)!;
+    const toggle = q<HTMLButtonElement>('[data-toggle]')!;
+
+    // Theme tokens are re-read only when the theme actually changes — reading
+    // computed styles every frame would be wasteful.
+    let C: Record<string, string> = {};
+    const readTokens = () => {
+      const s = getComputedStyle(document.documentElement);
+      const g = (n: string) => s.getPropertyValue(n).trim();
+      C = {
+        scan: g('--ch-scan'), io: g('--ch-io'), cpu: g('--ch-cpu'),
+        db: g('--ch-db'), stall: g('--ch-stall'),
+        ink: g('--ink'), muted: g('--muted'),
+        rule: g('--rule'), ruleSoft: g('--rule-soft'), surf2: g('--surface-2'),
+        mono: getComputedStyle(document.body).getPropertyValue('--mono').trim(),
+      };
+    };
+    readTokens();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+    new MutationObserver(readTokens).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    const params: SimParams = { depth: 12, drain: 9, workers: 4 };
+    const state = initState();
+    const trace = STAGES.map(() => new Array<number>(TRACE).fill(0)); // 0 idle, 1 busy, 2 stalled
+
+    let running = true;
+    let last = 0;
+    let elapsed = 0;
+    let traceAcc = 0;
+    const completions: number[] = [];
+
+    const sync = () => {
+      params.depth = +input('depth').value;
+      params.drain = +input('drain').value / 10;
+      params.workers = +input('workers').value;
+      out('depth').textContent = String(params.depth);
+      out('drain').textContent = params.drain.toFixed(1) + '/s';
+      out('workers').textContent = String(params.workers);
+    };
+    (['depth', 'drain', 'workers'] as const).forEach((n) =>
+      input(n).addEventListener('input', sync),
+    );
+    sync();
+
+    toggle.addEventListener('click', () => {
+      running = !running;
+      toggle.textContent = running ? 'Pause' : 'Resume';
+      if (running) {
+        last = 0;
+        requestAnimationFrame(frame);
+      }
+    });
+
+    function advance(dt: number) {
+      elapsed += dt;
+      const done = step(state, params, dt);
+      for (let i = 0; i < done; i++) completions.push(elapsed);
+      while (completions.length && elapsed - completions[0] > 2) completions.shift();
+
+      traceAcc += dt;
+      if (traceAcc >= 0.06) {
+        traceAcc = 0;
+        for (let i = 0; i < STAGES.length; i++) {
+          trace[i].shift();
+          trace[i].push(state[i].stalled ? 2 : state[i].credit > 0 || state[i].q > 0 ? 1 : 0);
+        }
+      }
+    }
+
+    function draw() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const W = canvas.clientWidth;
+      if (canvas.width !== Math.round(W * dpr)) {
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(HEIGHT * dpr);
+      }
+      canvas.style.height = HEIGHT + 'px';
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, W, HEIGHT);
+
+      const n = STAGES.length;
+      const gapW = Math.max(26, W * 0.045);
+      const boxW = (W - gapW * (n - 1)) / n;
+      const boxH = 66;
+      const top = 16;
+
+      for (let i = 0; i < n; i++) {
+        const x = i * (boxW + gapW);
+        const s = state[i];
+        const col = s.stalled ? C.stall : C[STAGES[i].key];
+
+        ctx!.fillStyle = C.surf2;
+        ctx!.strokeStyle = col;
+        ctx!.lineWidth = s.stalled ? 2 : 1.25;
+        ctx!.beginPath();
+        ctx!.roundRect(x, top, boxW, boxH, 3);
+        ctx!.fill();
+        ctx!.stroke();
+
+        ctx!.textAlign = 'center';
+        ctx!.fillStyle = col;
+        ctx!.font = `700 13px ${C.mono}`;
+        ctx!.fillText(STAGES[i].name, x + boxW / 2, top + 27);
+
+        ctx!.fillStyle = C.muted;
+        ctx!.font = `10px ${C.mono}`;
+        ctx!.fillText(s.stalled ? 'STALLED' : STAGES[i].runtime, x + boxW / 2, top + 46);
+        ctx!.font = `9px ${C.mono}`;
+        ctx!.fillText(rateOf(i, params).toFixed(1) + '/s', x + boxW / 2, top + 59);
+
+        if (i < n - 1) {
+          const qy = top + boxH + 22;
+          const qh = 30;
+          const qx = x + boxW + 3;
+          const qw = gapW - 6;
+          const fill = Math.min(1, s.q / params.depth);
+
+          ctx!.strokeStyle = C.rule;
+          ctx!.lineWidth = 1;
+          ctx!.beginPath();
+          ctx!.roundRect(qx, qy, qw, qh, 2);
+          ctx!.stroke();
+
+          ctx!.fillStyle = fill > 0.92 ? C.stall : C[STAGES[i].key];
+          ctx!.globalAlpha = 0.75;
+          ctx!.fillRect(qx + 1, qy + qh - 1 - (qh - 2) * fill, qw - 2, (qh - 2) * fill);
+          ctx!.globalAlpha = 1;
+
+          ctx!.fillStyle = C.muted;
+          ctx!.font = `9px ${C.mono}`;
+          ctx!.fillText(`${Math.round(s.q)}/${params.depth}`, qx + qw / 2, qy + qh + 12);
+
+          const ay = top + boxH / 2;
+          ctx!.strokeStyle = C.rule;
+          ctx!.lineWidth = 1.5;
+          ctx!.beginPath();
+          ctx!.moveTo(x + boxW + 4, ay);
+          ctx!.lineTo(x + boxW + gapW - 8, ay);
+          ctx!.stroke();
+          ctx!.beginPath();
+          ctx!.moveTo(x + boxW + gapW - 4, ay);
+          ctx!.lineTo(x + boxW + gapW - 11, ay - 4);
+          ctx!.lineTo(x + boxW + gapW - 11, ay + 4);
+          ctx!.closePath();
+          ctx!.fillStyle = C.rule;
+          ctx!.fill();
+        }
+      }
+
+      // Logic-analyser trace: solid = doing work, red = blocked downstream.
+      const ty = 178;
+      const rowH = 26;
+      const tx0 = 58;
+      const cw = (W - tx0) / TRACE;
+      ctx!.textAlign = 'left';
+      for (let i = 0; i < n; i++) {
+        const y = ty + i * rowH;
+        ctx!.fillStyle = C.muted;
+        ctx!.font = `9px ${C.mono}`;
+        ctx!.fillText(STAGES[i].name, 0, y + 12);
+
+        for (let k = 0; k < TRACE; k++) {
+          const v = trace[i][k];
+          if (v === 0) continue;
+          ctx!.fillStyle = v === 2 ? C.stall : C[STAGES[i].key];
+          ctx!.globalAlpha = v === 2 ? 0.9 : 0.55;
+          ctx!.fillRect(tx0 + k * cw, y + 2, Math.max(1, cw - 0.6), 13);
+        }
+        ctx!.globalAlpha = 1;
+        ctx!.strokeStyle = C.ruleSoft;
+        ctx!.lineWidth = 1;
+        ctx!.beginPath();
+        ctx!.moveTo(tx0, y + 17.5);
+        ctx!.lineTo(W, y + 17.5);
+        ctx!.stroke();
+      }
+    }
+
+    function report() {
+      readout('tp').textContent = (completions.length / 2).toFixed(1) + '/s';
+
+      const s0 = state[0];
+      const total = s0.busyMs + s0.stallMs;
+      const pct = total > 0 ? Math.round((100 * s0.stallMs) / total) : 0;
+      const stallEl = readout('stall');
+      stallEl.textContent = pct + '%';
+      stallEl.className = pct > 25 ? 'warn' : '';
+
+      readout('inflight').textContent = String(
+        state.reduce((a, s) => a + Math.round(s.q), 0),
+      );
+
+      let slowest = 0;
+      for (let i = 1; i < STAGES.length; i++) {
+        if (rateOf(i, params) < rateOf(slowest, params)) slowest = i;
+      }
+      readout('neck').textContent = STAGES[slowest].name;
+    }
+
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      if (running) advance(dt);
+      draw();
+      report();
+      if (running) requestAnimationFrame(frame);
+    }
+
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Never a blank canvas: settle to steady state, then hold.
+      running = false;
+      toggle.textContent = 'Resume';
+      for (let i = 0; i < 400; i++) advance(0.05);
+      draw();
+      report();
+    } else {
+      requestAnimationFrame(frame);
+    }
+
+    addEventListener('resize', () => {
+      if (!running) draw();
+    });
+  }
+
+  document.querySelectorAll<HTMLCanvasElement>('canvas[data-pipe]').forEach(initPipe);
+</script>

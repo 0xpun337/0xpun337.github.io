@@ -1,0 +1,366 @@
+/* Element defaults and layout primitives. Colors come from tokens.css only —
+   no literal ever appears here, so both themes resolve as a complete set. */
+
+*, *::before, *::after { box-sizing: border-box; }
+body, h1, h2, h3, p, ul, ol, figure, dl, dd { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+img, canvas, svg { display: block; max-width: 100%; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.wrap {
+  max-width: var(--wide);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+/* Reading column.
+   Narrow: one full-width track; prose is capped at the measure and centred,
+   figures opt out of the cap so they stay wide.
+   Wide (>=1040px): a named-line grid. Prose sits in `main`, a `.note` placed
+   immediately after a paragraph auto-places into that paragraph's row out in
+   the margin, and figures span `full`.
+   The 68ch measure is a legibility limit — do not widen it. */
+.col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.1em;
+}
+.col > * {
+  width: 100%;
+  max-width: var(--measure);
+  margin-inline: auto;
+}
+.col > figure { max-width: none; }
+
+@media (min-width: 1040px) {
+  .col {
+    grid-template-columns:
+      [full-start] minmax(0, 1fr)
+      [main-start] minmax(0, var(--measure))
+      [main-end note-start] var(--margin-col)
+      [note-end] minmax(0, 1fr) [full-end];
+    column-gap: 40px;
+  }
+  .col > * {
+    grid-column: main-start / main-end;
+    max-width: none;
+    margin-inline: 0;
+  }
+  .col > .note {
+    grid-column: note-start / note-end;
+    align-self: start;
+    margin-top: .28em;
+  }
+  .col > figure { grid-column: full-start / full-end; }
+}
+
+/* ─── masthead ─── */
+.masthead { border-bottom: 1px solid var(--rule); background: var(--surface); }
+.masthead .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 18px;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: .06em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.wordmark .lit { color: var(--accent); }
+.masthead nav {
+  display: flex;
+  gap: 22px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.masthead nav a { color: var(--muted); text-decoration: none; }
+.masthead nav a:hover { color: var(--accent); }
+
+/* ─── article type ─── */
+article { padding-block: 64px 40px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ch-cpu);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+h1 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -.02em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.deck {
+  font-size: 21px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.byline {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding-block: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+
+h2 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-top: 1.4em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+article p { text-wrap: pretty; }
+article strong { font-weight: 700; color: var(--ink); }
+article a { color: var(--accent); text-underline-offset: 3px; }
+
+/* Sidenote: margin on wide screens, inline below its paragraph on narrow.
+   Same element either way — no duplicated markup. */
+.note {
+  border-left: 2px solid var(--ch-cpu);
+  padding-left: 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.note b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ch-cpu);
+  margin-bottom: 5px;
+}
+
+code:not(pre code) {
+  font-family: var(--mono);
+  font-size: .86em;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-soft);
+  border-radius: 3px;
+  padding: .08em .34em;
+}
+
+/* Shiki output — wide code scrolls inside its own box, never the page. */
+.astro-code {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.62;
+  tab-size: 4;
+}
+
+/* ─── figures ───
+   Global, not component-scoped: Astro scopes styles to the component that
+   declares them, and slotted markup arrives from the parent, so scoping the
+   figure chrome would leave the controls and readout unstyled. */
+figure {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-block: 1.1em;
+}
+.fig-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.fig-head .label { color: var(--accent); font-weight: 700; }
+.fig-head .title { color: var(--muted); letter-spacing: .06em; }
+.fig-stage { padding: 20px; }
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 18px 26px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--rule-soft);
+  background: var(--surface-2);
+}
+.ctl { display: flex; flex-direction: column; gap: 7px; }
+.ctl-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ctl-top output {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: ew-resize;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px; background: var(--rule); border-radius: 2px;
+}
+input[type="range"]::-moz-range-track {
+  height: 3px; background: var(--rule); border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px; margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 3px;
+  cursor: pointer;
+  align-self: end;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border-top: 1px solid var(--rule-soft);
+  font-family: var(--mono);
+}
+.readout > div {
+  padding: 12px 20px;
+  border-right: 1px solid var(--rule-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.readout > div:last-child { border-right: 0; }
+.readout dt {
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.readout dd {
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.readout dd.warn { color: var(--ch-stall); }
+
+figcaption {
+  padding: 14px 20px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+figcaption b { color: var(--ink-2); font-weight: 700; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.legend span { display: flex; align-items: center; gap: 7px; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; display: block; }
+
+/* ─── footer ─── */
+footer {
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  margin-top: 56px;
+  padding-block: 40px 56px;
+}
+footer p { font-size: 16px; color: var(--ink-2); }
+footer a { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    transition-duration: .001ms !important;
+  }
+}

@@ -1,0 +1,807 @@
+<title>pun337 — design demo</title>
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   TOKENS — light is the bare :root; dark redefines tokens only.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --ground:     #EDEFF3;
+  --surface:    #FFFFFF;
+  --surface-2:  #F5F7FA;
+  --ink:        #14171D;
+  --ink-2:      #3D4453;
+  --muted:      #6B7484;
+  --rule:       #D5DAE3;
+  --rule-soft:  #E4E8EF;
+
+  /* channel palette — resistor colour code, used as data encoding */
+  --ch-scan:    #C4611C;
+  --ch-io:      #1E5FA8;
+  --ch-cpu:     #6B4BA8;
+  --ch-db:      #17795E;
+  --ch-stall:   #B32B2B;
+
+  --accent:     var(--ch-io);
+  --accent-ink: #FFFFFF;
+
+  --shadow: 0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.06);
+
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Source Serif 4", Georgia, "Times New Roman", serif;
+
+  --measure: 68ch;
+  --wide: 1080px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:    #0E1116;
+    --surface:   #151920;
+    --surface-2: #1B212A;
+    --ink:       #E4E8EE;
+    --ink-2:     #B6BECB;
+    --muted:     #838D9C;
+    --rule:      #29313D;
+    --rule-soft: #1F262F;
+
+    --ch-scan:  #E08A45;
+    --ch-io:    #5B9BE0;
+    --ch-cpu:   #A489E8;
+    --ch-db:    #35B394;
+    --ch-stall: #E06B6B;
+
+    --accent:     var(--ch-io);
+    --accent-ink: #0E1116;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:    #0E1116;
+  --surface:   #151920;
+  --surface-2: #1B212A;
+  --ink:       #E4E8EE;
+  --ink-2:     #B6BECB;
+  --muted:     #838D9C;
+  --rule:      #29313D;
+  --rule-soft: #1F262F;
+
+  --ch-scan:  #E08A45;
+  --ch-io:    #5B9BE0;
+  --ch-cpu:   #A489E8;
+  --ch-db:    #35B394;
+  --ch-stall: #E06B6B;
+
+  --accent:     var(--ch-io);
+  --accent-ink: #0E1116;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+}
+
+/* ───────────────────────────── base ───────────────────────────── */
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: var(--wide);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+/* ─────────────────────────── masthead ─────────────────────────── */
+.masthead {
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+.masthead .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 18px;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: .06em;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.wordmark .lit { color: var(--accent); }
+.masthead nav {
+  display: flex;
+  gap: 22px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.masthead nav a { color: var(--muted); text-decoration: none; }
+.masthead nav a:hover { color: var(--accent); }
+
+/* ────────────────────────── demo notice ───────────────────────── */
+.notice {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.notice .wrap { padding-block: 10px; }
+.notice b { color: var(--ink-2); font-weight: 700; }
+
+/* ──────────────────────────── article ─────────────────────────── */
+article { padding-block: 64px 40px; }
+
+.col {
+  max-width: var(--measure);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ch-cpu);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+h1 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -.02em;
+  text-transform: uppercase;
+  text-wrap: balance;
+  margin-block: .1em 0;
+}
+.deck {
+  font-size: 21px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.byline {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding-block: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+
+h2 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-top: 1.4em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+article p { margin: 0; text-wrap: pretty; }
+article strong { font-weight: 700; color: var(--ink); }
+code.inl {
+  font-family: var(--mono);
+  font-size: .86em;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-soft);
+  border-radius: 3px;
+  padding: .08em .34em;
+  color: var(--ink);
+}
+
+/* pull-quote / sidenote, inline on narrow screens */
+.aside {
+  border-left: 2px solid var(--ch-cpu);
+  padding-left: 16px;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  font-family: var(--serif);
+}
+
+/* ──────────────────────────── figure ──────────────────────────── */
+figure {
+  max-width: var(--wide);
+  margin: 2.2em auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.fig-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.fig-head .label { color: var(--accent); font-weight: 700; }
+.fig-head .title { color: var(--muted); letter-spacing: .06em; }
+
+.fig-stage { padding: 20px; }
+canvas { display: block; width: 100%; }
+
+/* controls */
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 18px 26px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--rule-soft);
+  background: var(--surface-2);
+}
+.ctl { display: flex; flex-direction: column; gap: 7px; }
+.ctl-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ctl-top output {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: ew-resize;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px; background: var(--rule); border-radius: 2px;
+}
+input[type="range"]::-moz-range-track {
+  height: 3px; background: var(--rule); border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px; margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 3px;
+  cursor: pointer;
+  align-self: end;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* readout strip */
+.readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border-top: 1px solid var(--rule-soft);
+  font-family: var(--mono);
+}
+.readout div {
+  padding: 12px 20px;
+  border-right: 1px solid var(--rule-soft);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.readout div:last-child { border-right: 0; }
+.readout dt {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+.readout dd {
+  font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.readout dd.warn { color: var(--ch-stall); }
+
+figcaption {
+  padding: 14px 20px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+figcaption b { color: var(--ink-2); font-weight: 700; }
+
+/* ───────────────────────────── code ───────────────────────────── */
+.code {
+  max-width: var(--measure);
+  margin-inline: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.code-head {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--surface-2);
+}
+pre {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.62;
+  color: var(--ink);
+  tab-size: 4;
+}
+.k { color: var(--ch-cpu); }
+.f { color: var(--ch-io); }
+.s { color: var(--ch-db); }
+.c { color: var(--muted); font-style: italic; }
+.t { color: var(--ch-scan); }
+
+/* ─────────────────────────── legend ───────────────────────────── */
+.legend {
+  display: flex; flex-wrap: wrap; gap: 8px 20px;
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.legend span { display: flex; align-items: center; gap: 7px; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; display: block; }
+
+/* ─────────────────────────── footer ───────────────────────────── */
+footer {
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  margin-top: 56px;
+  padding-block: 40px 56px;
+}
+footer .col { gap: .9em; }
+footer h3 {
+  font-family: var(--mono); font-size: 13px; letter-spacing: .14em;
+  text-transform: uppercase; margin: 0; color: var(--ink);
+}
+footer p, footer li { font-size: 16px; color: var(--ink-2); }
+footer ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: .4em; }
+footer code { font-family: var(--mono); font-size: .88em; color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="wordmark">pun<span class="lit">337</span>&nbsp;/&nbsp;mishra</div>
+    <nav>
+      <a href="#">Writing</a>
+      <a href="#">Series</a>
+      <a href="#">About</a>
+    </nav>
+  </div>
+</header>
+
+<div class="notice">
+  <div class="wrap"><b>DESIGN DEMO</b> — one post, one live figure, so you can judge the look before we build anything. Everything below is real and interactive. Try your OS light/dark toggle.</div>
+</div>
+
+<article>
+  <div class="wrap">
+    <div class="col">
+      <div class="eyebrow">Push Pipeline &nbsp;·&nbsp; Part 1 of 6</div>
+      <h1>Two runtimes, one pipeline</h1>
+      <p class="deck">Tokio owns the I/O. Rayon owns the CPU. Almost nobody talks about the seam between them — which is where all the interesting engineering actually lives.</p>
+      <div class="byline">
+        <span>Rust</span><span>Tokio</span><span>Rayon</span><span>14 min</span><span>2026</span>
+      </div>
+
+      <p>The obvious way to build a high-throughput ingest service in Rust is to put everything on Tokio and call it a day. Read the file with <code class="inl">tokio::fs</code>, decrypt it in the same task, encode the rows, hand them to the database driver. One runtime, one mental model, no seams to reason about.</p>
+
+      <p>That design has a specific failure mode, and it is not subtle. Decryption and parsing are pure CPU work measured in <em>milliseconds</em>. Drop a millisecond of AES-GCM onto a Tokio worker thread and you have blocked a reactor that was supposed to be servicing hundreds of sockets. Do it on all of them at once and the async runtime stops being a runtime — it becomes an expensive thread pool with a scheduler you can't control.</p>
+
+      <p class="aside">The rule that falls out of this: <strong>a future that computes is a future that lies.</strong> It claims it will yield and then doesn't.</p>
+
+      <p>So the pipeline runs on <strong>two runtimes, deliberately kept apart</strong>. Tokio handles everything that waits — directory scans, file reads, the Postgres connection. Rayon handles everything that computes, on a pool whose threads are pinned to specific cores so the scheduler can't migrate a half-finished decrypt across an L2 boundary. Between them sits a bridge: a bounded channel in each direction, and a <code class="inl">oneshot</code> to carry each result home.</p>
+
+      <h2><span class="num">01</span> Backpressure is the whole design</h2>
+
+      <p>Every stage hands work forward through a <strong>bounded</strong> channel, and the bound is not a tuning detail — it is the mechanism. When the database slows down, the writer's queue fills. When the writer's queue fills, the encoder blocks trying to push into it. That block propagates backwards, stage by stage, until it reaches the scanner, which simply stops claiming new files off disk.</p>
+
+      <p>Nothing anywhere in the system measures load or makes a decision about it. The stall <em>is</em> the signal. Drag the sliders below and watch it travel upstream:</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <figure>
+      <div class="fig-head">
+        <span class="label">Fig. 1.1</span>
+        <span class="title">Backpressure propagation across a bounded five-stage pipeline</span>
+      </div>
+
+      <div class="fig-stage">
+        <canvas id="pipe" height="330" aria-label="Animated diagram of a five-stage pipeline. Stages fill bounded queues; when the database drain rate drops, queues saturate and stalls propagate upstream to the scanner."></canvas>
+      </div>
+
+      <div class="controls">
+        <div class="ctl">
+          <div class="ctl-top"><label for="depth">Queue depth</label><output id="depth-o">12</output></div>
+          <input type="range" id="depth" min="2" max="40" value="12">
+        </div>
+        <div class="ctl">
+          <div class="ctl-top"><label for="drain">DB drain rate</label><output id="drain-o">9.0/s</output></div>
+          <input type="range" id="drain" min="10" max="200" value="90">
+        </div>
+        <div class="ctl">
+          <div class="ctl-top"><label for="cpu">Rayon workers</label><output id="cpu-o">4</output></div>
+          <input type="range" id="cpu" min="1" max="12" value="4">
+        </div>
+        <button class="btn" id="toggle" type="button">Pause</button>
+      </div>
+
+      <dl class="readout">
+        <div><dt>Throughput</dt><dd id="r-tp">0.0/s</dd></div>
+        <div><dt>Scanner stalled</dt><dd id="r-stall">0%</dd></div>
+        <div><dt>In flight</dt><dd id="r-inflight">0</dd></div>
+        <div><dt>Bottleneck</dt><dd id="r-neck">—</dd></div>
+      </dl>
+
+      <figcaption>
+        Each stage runs on its own runtime — <b>scanner and reader on Tokio's blocking pool</b>, <b>decode and encode on the core-pinned Rayon pool</b>, <b>COPY on the async reactor</b>. The trace at the bottom is a logic-analyser view: solid means the stage is doing work, hollow means it is blocked on a full downstream queue. Starve the database and watch red march leftwards.
+      </figcaption>
+    </figure>
+  </div>
+
+  <div class="wrap">
+    <div class="col">
+      <div class="legend">
+        <span><i style="background:var(--ch-scan)"></i>Scanner</span>
+        <span><i style="background:var(--ch-io)"></i>Tokio / I-O</span>
+        <span><i style="background:var(--ch-cpu)"></i>Rayon / CPU</span>
+        <span><i style="background:var(--ch-db)"></i>Writer</span>
+        <span><i style="background:var(--ch-stall)"></i>Stalled</span>
+      </div>
+
+      <h2><span class="num">02</span> The bridge</h2>
+
+      <p>Handing work from an async task to a Rayon pool is where most implementations quietly go wrong. You cannot <code class="inl">await</code> inside Rayon and you must not block inside Tokio, so the bridge has to be explicit — a job goes across on a crossbeam channel, and a <code class="inl">oneshot::Sender</code> rides along with it to carry the answer back.</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="code">
+      <div class="code-head">src/core/pipeline.rs</div>
+<pre><span class="c">// Async side: hand the CPU job across, then await the answer.</span>
+<span class="k">let</span> (tx, rx) = <span class="f">oneshot</span>::<span class="f">channel</span>();
+
+cpu_tx.<span class="f">send</span>(<span class="t">DecodeJob</span> { envelope, reply: tx })?;
+
+<span class="c">// The reactor thread is free the entire time this is pending —</span>
+<span class="c">// no AES, no parsing, nothing that computes, ever runs here.</span>
+<span class="k">let</span> parsed = rx.<span class="f">await</span>.<span class="f">map_err</span>(|_| <span class="t">Error</span>::<span class="t">CpuPoolGone</span>)??;
+
+<span class="c">// Rayon side: pure CPU, pinned core, zero awareness of async.</span>
+pool.<span class="f">spawn</span>(<span class="k">move</span> || {
+    <span class="k">let</span> out = <span class="f">decrypt_and_parse</span>(&amp;job.envelope);
+    <span class="k">let</span> _ = job.reply.<span class="f">send</span>(out); <span class="c">// receiver dropped = caller cancelled</span>
+});</pre>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="col">
+      <p>The <code class="inl">?</code>-<code class="inl">?</code> on that await is not a typo. The outer one catches <em>the pool died</em>; the inner one catches <em>the job failed</em>. Collapsing them into one error type is how you end up unable to tell a corrupt payload from a panicked worker at three in the morning.</p>
+    </div>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap">
+    <div class="col">
+      <h3>What this demo is showing you</h3>
+      <p>This is one page, hand-built, standing in for what the real Astro site would produce. Judge four things:</p>
+      <ul>
+        <li><strong>The type system</strong> — mono for headings and labels, serif for reading. Inverted from the usual, because instrument manuals set it this way.</li>
+        <li><strong>The channel palette</strong> — every stage owns a colour, and that same colour means the same thing in every figure across all six posts.</li>
+        <li><strong>The figure treatment</strong> — numbered, framed, with its own readout strip. The page around it stays quiet so the motion carries.</li>
+        <li><strong>Both themes</strong> — flip your OS setting. Neither one is an inversion of the other.</li>
+      </ul>
+      <h3>Not in the demo</h3>
+      <p>Search, tag pages, the post index, RSS, the other five figures. Those are build work, not design decisions — the plan covers them.</p>
+      <h3>Naming</h3>
+      <p><code>pun337</code> is taken on GitHub. Best options: buy <code>pun337.dev</code> (~$12/yr, beats any .github.io), or take <code>0xpun337</code> free.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const cv = document.getElementById('pipe');
+  const ctx = cv.getContext('2d');
+
+  const STAGES = [
+    { name: 'SCAN',   rt: 'tokio',  key: 'scan', rate: 26 },
+    { name: 'READ',   rt: 'tokio',  key: 'io',   rate: 22 },
+    { name: 'DECODE', rt: 'rayon',  key: 'cpu',  rate: 7  },
+    { name: 'ENCODE', rt: 'rayon',  key: 'cpu',  rate: 14 },
+    { name: 'COPY',   rt: 'tokio',  key: 'db',   rate: 9  },
+  ];
+
+  // live theme tokens, re-read only when the theme actually changes
+  let C = {};
+  const readTokens = () => {
+    const s = getComputedStyle(document.documentElement);
+    const g = n => s.getPropertyValue(n).trim();
+    C = {
+      scan: g('--ch-scan'), io: g('--ch-io'), cpu: g('--ch-cpu'),
+      db: g('--ch-db'), stall: g('--ch-stall'),
+      ink: g('--ink'), muted: g('--muted'),
+      rule: g('--rule'), ruleSoft: g('--rule-soft'),
+      surf2: g('--surface-2'), surf: g('--surface'),
+    };
+  };
+  readTokens();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+  new MutationObserver(readTokens).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  const el = id => document.getElementById(id);
+  const depthI = el('depth'), drainI = el('drain'), cpuI = el('cpu'), toggle = el('toggle');
+
+  const st = STAGES.map(() => ({ q: 0, credit: 0, stalled: false, busyMs: 0, stallMs: 0 }));
+  let depth = 12, drain = 9, workers = 4;
+  let running = true, done = 0, tpWin = [], last = 0, elapsed = 0;
+  const TRACE = 90;
+  const trace = STAGES.map(() => new Array(TRACE).fill(0)); // 0 idle, 1 busy, 2 stalled
+  let traceAcc = 0;
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const sync = () => {
+    depth = +depthI.value;
+    drain = +drainI.value / 10;
+    workers = +cpuI.value;
+    el('depth-o').textContent = depth;
+    el('drain-o').textContent = drain.toFixed(1) + '/s';
+    el('cpu-o').textContent = workers;
+  };
+  [depthI, drainI, cpuI].forEach(i => i.addEventListener('input', sync));
+  sync();
+
+  toggle.addEventListener('click', () => {
+    running = !running;
+    toggle.textContent = running ? 'Pause' : 'Resume';
+    if (running) { last = performance.now(); requestAnimationFrame(frame); }
+  });
+
+  const rateOf = (i) => {
+    if (i === 4) return drain;                       // COPY — the DB slider
+    if (STAGES[i].rt === 'rayon') return STAGES[i].rate * (workers / 4);
+    return STAGES[i].rate;
+  };
+
+  function step(dt) {
+    elapsed += dt;
+    // walk downstream-first so freed slots are visible to upstream this tick
+    for (let i = STAGES.length - 1; i >= 0; i--) {
+      const s = st[i];
+      const isLast = i === STAGES.length - 1;
+      const hasWork = i === 0 ? true : st[i - 1].q > 0;
+      const roomAhead = isLast ? true : s.q < depth;
+
+      if (!hasWork) { s.stalled = false; s.credit = 0; continue; }
+      if (!roomAhead) { s.stalled = true; s.stallMs += dt; continue; }
+
+      s.stalled = false;
+      s.busyMs += dt;
+      s.credit += rateOf(i) * dt;
+      while (s.credit >= 1) {
+        if (i > 0) { if (st[i - 1].q <= 0) break; st[i - 1].q--; }
+        s.credit -= 1;
+        if (isLast) { done++; tpWin.push(elapsed); }
+        else { s.q++; if (s.q >= depth) { break; } }
+      }
+    }
+    // trailing-2s throughput window
+    while (tpWin.length && elapsed - tpWin[0] > 2) tpWin.shift();
+
+    traceAcc += dt;
+    if (traceAcc >= 0.06) {
+      traceAcc = 0;
+      for (let i = 0; i < STAGES.length; i++) {
+        trace[i].shift();
+        trace[i].push(st[i].stalled ? 2 : (st[i].credit > 0 || st[i].q > 0 ? 1 : 0));
+      }
+    }
+  }
+
+  function draw() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const W = cv.clientWidth, H = 330;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    cv.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const n = STAGES.length;
+    const gapW = Math.max(26, W * 0.045);
+    const boxW = (W - gapW * (n - 1)) / n;
+    const boxH = 66, top = 16;
+
+    for (let i = 0; i < n; i++) {
+      const x = i * (boxW + gapW);
+      const s = st[i];
+      const col = s.stalled ? C.stall : C[STAGES[i].key];
+
+      // stage box
+      ctx.fillStyle = C.surf2;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = s.stalled ? 2 : 1.25;
+      ctx.beginPath(); ctx.roundRect(x, top, boxW, boxH, 3); ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = col;
+      ctx.font = '700 13px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+      ctx.textAlign = 'center';
+      ctx.fillText(STAGES[i].name, x + boxW / 2, top + 27);
+
+      ctx.fillStyle = C.muted;
+      ctx.font = '10px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+      ctx.fillText(s.stalled ? 'STALLED' : STAGES[i].rt, x + boxW / 2, top + 46);
+
+      ctx.fillStyle = C.muted;
+      ctx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+      ctx.fillText(rateOf(i).toFixed(1) + '/s', x + boxW / 2, top + 59);
+
+      // outbound bounded queue
+      if (i < n - 1) {
+        const qy = top + boxH + 22, qh = 30;
+        const qx = x + boxW + 3, qw = gapW - 6;
+        const fill = Math.min(1, s.q / depth);
+
+        ctx.strokeStyle = C.rule; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(qx, qy, qw, qh, 2); ctx.stroke();
+        ctx.fillStyle = fill > 0.92 ? C.stall : C[STAGES[i].key];
+        ctx.globalAlpha = 0.75;
+        ctx.fillRect(qx + 1, qy + qh - 1 - (qh - 2) * fill, qw - 2, (qh - 2) * fill);
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = C.muted;
+        ctx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.round(s.q) + '/' + depth, qx + qw / 2, qy + qh + 12);
+
+        // arrow
+        ctx.strokeStyle = C.rule; ctx.lineWidth = 1.5;
+        const ay = top + boxH / 2;
+        ctx.beginPath(); ctx.moveTo(x + boxW + 4, ay); ctx.lineTo(x + boxW + gapW - 8, ay); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + boxW + gapW - 4, ay);
+        ctx.lineTo(x + boxW + gapW - 11, ay - 4);
+        ctx.lineTo(x + boxW + gapW - 11, ay + 4);
+        ctx.closePath(); ctx.fillStyle = C.rule; ctx.fill();
+      }
+    }
+
+    // logic-analyser trace
+    const ty = 178, rowH = 26;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < n; i++) {
+      const y = ty + i * rowH;
+      ctx.fillStyle = C.muted;
+      ctx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+      ctx.fillText(STAGES[i].name, 0, y + 12);
+
+      const tx0 = 58, tw = W - tx0;
+      const cw = tw / TRACE;
+      for (let k = 0; k < TRACE; k++) {
+        const v = trace[i][k];
+        if (v === 0) continue;
+        ctx.fillStyle = v === 2 ? C.stall : C[STAGES[i].key];
+        ctx.globalAlpha = v === 2 ? 0.9 : 0.55;
+        ctx.fillRect(tx0 + k * cw, y + 2, Math.max(1, cw - 0.6), 13);
+      }
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.ruleSoft; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(tx0, y + 17.5); ctx.lineTo(W, y + 17.5); ctx.stroke();
+    }
+  }
+
+  function readout() {
+    const tp = tpWin.length / 2;
+    el('r-tp').textContent = tp.toFixed(1) + '/s';
+
+    const s0 = st[0];
+    const pct = s0.busyMs + s0.stallMs > 0 ? Math.round(100 * s0.stallMs / (s0.busyMs + s0.stallMs)) : 0;
+    const se = el('r-stall');
+    se.textContent = pct + '%';
+    se.className = pct > 25 ? 'warn' : '';
+
+    el('r-inflight').textContent = st.reduce((a, s) => a + Math.round(s.q), 0);
+
+    let slowest = 0;
+    for (let i = 1; i < STAGES.length; i++) if (rateOf(i) < rateOf(slowest)) slowest = i;
+    el('r-neck').textContent = STAGES[slowest].name;
+  }
+
+  function frame(now) {
+    if (!last) last = now;
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (running) step(dt);
+    draw();
+    readout();
+    if (running) requestAnimationFrame(frame);
+  }
+
+  if (reduced) {
+    running = false;
+    toggle.textContent = 'Resume';
+    for (let i = 0; i < 400; i++) step(0.05);   // settle to steady state, then hold
+    draw(); readout();
+  } else {
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', () => { if (!running) draw(); });
+})();
+</script>

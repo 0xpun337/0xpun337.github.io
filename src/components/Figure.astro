@@ -1,0 +1,22 @@
+---
+/** Shared frame for every figure on the site: numbered label, title, stage,
+ *  optional controls and readout strips, caption. Styling lives in base.css
+ *  so slotted markup inherits it. */
+interface Props {
+  label: string;
+  title: string;
+}
+
+const { label, title } = Astro.props;
+---
+
+<figure>
+  <div class="fig-head">
+    <span class="label">{label}</span>
+    <span class="title">{title}</span>
+  </div>
+  <div class="fig-stage"><slot /></div>
+  <slot name="controls" />
+  <slot name="readout" />
+  <figcaption><slot name="caption" /></figcaption>
+</figure>

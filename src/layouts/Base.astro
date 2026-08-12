@@ -1,0 +1,55 @@
+---
+import '../styles/tokens.css';
+import '../styles/base.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const year = new Date().getFullYear();
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="article" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="alternate" type="application/rss+xml" title="0xpun337" href="/rss.xml" />
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="wrap">
+        <a class="wordmark" href="/">0x<span class="lit">pun337</span></a>
+        <nav>
+          <a href="/">Writing</a>
+          <a href="/about/">About</a>
+        </nav>
+      </div>
+    </header>
+
+    <slot />
+
+    <footer>
+      <div class="wrap">
+        <div class="col">
+          <p>
+            Written by Puneet Mishra, {year}. Techniques described here are my own;
+            all figures and benchmarks are reproduced on synthetic data.
+            <a href="/rss.xml">RSS</a>
+          </p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

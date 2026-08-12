@@ -1,0 +1,30 @@
+---
+import Base from './Base.astro';
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  post: CollectionEntry<'posts'>;
+}
+
+const { post } = Astro.props;
+const d = post.data;
+const date = d.published.toLocaleDateString('en-GB', { year: 'numeric', month: 'short' });
+---
+
+<Base title={`${d.title} — 0xpun337`} description={d.deck}>
+  <article>
+    <div class="wrap">
+      <div class="col">
+        <p class="eyebrow">{d.series} &nbsp;·&nbsp; Part {d.part} of {d.partsTotal}</p>
+        <h1>{d.title}</h1>
+        <p class="deck">{d.deck}</p>
+        <p class="byline">
+          {d.tags.map((t) => <span>{t}</span>)}
+          <span>{d.readingMinutes} min</span>
+          <span>{date}</span>
+        </p>
+      </div>
+    </div>
+    <slot />
+  </article>
+</Base>
