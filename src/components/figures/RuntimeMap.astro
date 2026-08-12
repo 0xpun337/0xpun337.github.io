@@ -77,8 +77,8 @@ const { label, title, caption } = Astro.props;
       const s = getComputedStyle(document.documentElement);
       const g = (n: string) => s.getPropertyValue(n).trim();
       C = {
-        io: g('--ch-io'), cpu: g('--ch-cpu'), db: g('--ch-db'),
-        stall: g('--ch-stall'), scan: g('--ch-scan'),
+        io: g('--ch-b'), cpu: g('--ch-c'), db: g('--ch-d'),
+        stall: g('--ch-alert'), scan: g('--ch-a'),
         ink: g('--ink'), muted: g('--muted'),
         rule: g('--rule'), ruleSoft: g('--rule-soft'), surf2: g('--surface-2'),
         mono: getComputedStyle(document.body).getPropertyValue('--mono').trim(),

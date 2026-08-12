@@ -227,12 +227,12 @@ const { label, title, caption } = Astro.props;
   }
   /* Tag / length / payload get the channel palette, so the byte roles read the
      same way stage colours do elsewhere on the site. */
-  .axdr .k-tag     { background: color-mix(in srgb, var(--ch-cpu) 22%, transparent); color: var(--ch-cpu); }
-  .axdr .k-length  { background: color-mix(in srgb, var(--ch-io) 22%, transparent);  color: var(--ch-io); }
-  .axdr .k-payload { background: color-mix(in srgb, var(--ch-db) 20%, transparent);  color: var(--ch-db); }
+  .axdr .k-tag     { background: color-mix(in srgb, var(--ch-c) 22%, transparent); color: var(--ch-c); }
+  .axdr .k-length  { background: color-mix(in srgb, var(--ch-b) 22%, transparent);  color: var(--ch-b); }
+  .axdr .k-payload { background: color-mix(in srgb, var(--ch-d) 20%, transparent);  color: var(--ch-d); }
   .axdr .by.err {
-    background: var(--ch-stall);
-    border-color: var(--ch-stall);
+    background: var(--ch-alert);
+    border-color: var(--ch-alert);
     color: var(--surface);
     font-weight: 700;
   }
@@ -247,8 +247,8 @@ const { label, title, caption } = Astro.props;
     border-left: 3px solid var(--rule);
     background: var(--surface-2);
   }
-  .axdr .verdict.ok  { border-left-color: var(--ch-db); color: var(--ch-db); }
-  .axdr .verdict.bad { border-left-color: var(--ch-stall); color: var(--ch-stall); }
+  .axdr .verdict.ok  { border-left-color: var(--ch-d); color: var(--ch-d); }
+  .axdr .verdict.bad { border-left-color: var(--ch-alert); color: var(--ch-alert); }
   .axdr .verdict span { color: var(--muted); }
 
   .axdr .tree {

@@ -8,7 +8,7 @@ export async function GET(context: APIContext) {
   );
 
   return rss({
-    title: '0xpun337 — systems engineering notes',
+    title: '0xpun337 — Puneet Mishra',
     description:
       'Systems engineering — Rust, C++, reverse engineering, and the layers underneath.',
     site: context.site!,

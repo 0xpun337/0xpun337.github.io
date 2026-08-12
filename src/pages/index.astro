@@ -1,72 +1,68 @@
 ---
 import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
-import HeroSignal from '../components/HeroSignal.astro';
+import Crackme from '../components/Crackme.astro';
 
 const posts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
-  (a, b) => a.data.part - b.data.part,
+  (a, b) => +b.data.published - +a.data.published,
 );
 
-const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
-  name,
-  entries: posts.filter((p) => p.data.series === name),
-  total: posts.filter((p) => p.data.series === name)[0]?.data.partsTotal ?? 0,
-}));
+const FIELDS = [
+  'Reverse engineering',
+  'Game hacking',
+  'Kernel & low-level',
+  'Obfuscation & unpacking',
+  'Algorithms & CP',
+  'Machine learning',
+  'CTF',
+];
 ---
 
 <Base
-  title="0xpun337 — systems engineering notes"
-  description="Systems engineering — Rust, C++, reverse engineering, and the layers underneath."
+  title="0xpun337 — Puneet Mishra"
+  description="Puneet Mishra. Reverse engineering, kernels, algorithms, machine learning — and writing about what's inside."
 >
   <section class="hero">
     <div class="wrap">
-      <p class="kicker">Puneet Mishra — systems engineering</p>
+      <p class="kicker">Puneet Mishra</p>
       <h1 class="mark">0x<span>pun337</span></h1>
       <p class="thesis">
-        I work at the layer where the abstractions
-        <em>stop helping</em>.
+        I take things apart. Binaries, kernels, protocols, models —
+        <em>whatever won't explain itself</em>.
       </p>
-    </div>
-    <HeroSignal />
-    <div class="wrap">
-      <p class="hero-caption">
-        Above: a five-stage pipeline, idling. Red is a stall travelling upstream.
-        It is the same simulation the posts below are about.
-      </p>
+
+      <ul class="fields">
+        {FIELDS.map((f) => <li>{f}</li>)}
+      </ul>
+
+      <Crackme />
     </div>
   </section>
 
   <section class="listing">
     <div class="wrap">
-      {
-        series.map((s) => (
-          <div class="series">
-            <div class="series-head">
-              <h2>{s.name}</h2>
-              <span class="count">
-                {s.entries.length} of {s.total} published
-              </span>
-            </div>
-            <ol class="index">
-              {s.entries.map((p) => (
-                <li>
-                  <a href={`/writing/${p.id}/`}>
-                    <span class="part">{String(p.data.part).padStart(2, '0')}</span>
-                    <span class="body">
-                      <span class="t">{p.data.title}</span>
-                      <span class="sub">{p.data.deck}</span>
-                      <span class="meta">
-                        {p.data.tags.join(' · ')} — {p.data.readingMinutes} min
-                      </span>
-                    </span>
-                    <span class="go" aria-hidden="true">→</span>
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </div>
-        ))
-      }
+      <div class="series-head">
+        <h2>Writing</h2>
+        <span class="count">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</span>
+      </div>
+      <ol class="index">
+        {
+          posts.map((p) => (
+            <li>
+              <a href={`/writing/${p.id}/`}>
+                <span class="body">
+                  <span class="t">{p.data.title}</span>
+                  <span class="sub">{p.data.deck}</span>
+                  <span class="meta">
+                    {p.data.tags.join(' · ')} — {p.data.readingMinutes} min
+                  </span>
+                </span>
+                <span class="go" aria-hidden="true">→</span>
+              </a>
+            </li>
+          ))
+        }
+      </ol>
     </div>
   </section>
 </Base>
@@ -75,8 +71,12 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
   .hero {
     border-bottom: 1px solid var(--rule);
     background: var(--surface);
-    padding-block: clamp(40px, 7vw, 84px) 0;
-    overflow: hidden;
+    padding-block: clamp(40px, 7vw, 80px) clamp(36px, 5vw, 60px);
+  }
+  .hero .wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
   }
 
   .kicker {
@@ -87,47 +87,47 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     color: var(--muted);
   }
 
-  /* The wordmark is the loudest thing on the site, and the only place the
-     type gets to be this big. Everything else stays quiet. */
+  /* The loudest type on the site, and the only place it gets to be this big. */
   .mark {
     font-family: var(--mono);
     font-weight: 700;
-    font-size: clamp(52px, 13vw, 148px);
-    line-height: .92;
+    font-size: clamp(48px, 12vw, 132px);
+    line-height: .94;
     letter-spacing: -.045em;
     color: var(--muted);
-    margin-block: .12em .18em;
+    margin-block: .12em .16em;
   }
   .mark span { color: var(--ink); }
 
   .thesis {
-    font-size: clamp(19px, 2.4vw, 26px);
+    font-size: clamp(19px, 2.3vw, 25px);
     line-height: 1.4;
     color: var(--ink-2);
-    max-width: 26ch;
+    max-width: 32ch;
     text-wrap: balance;
   }
   .thesis em { color: var(--accent); font-style: normal; }
 
-  .hero-signal {
-    margin-block: clamp(28px, 5vw, 52px) 14px;
-    mask-image: linear-gradient(to right, transparent, #000 12%, #000 100%);
+  .fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-block: 26px 30px;
+    padding: 0;
+    list-style: none;
   }
-
-  .hero-caption {
+  .fields li {
     font-family: var(--mono);
     font-size: 10.5px;
-    letter-spacing: .07em;
+    letter-spacing: .1em;
     text-transform: uppercase;
     color: var(--muted);
-    padding-bottom: 22px;
-    max-width: 62ch;
-    line-height: 1.6;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 6px 13px;
   }
 
-  .listing { padding-block: clamp(40px, 6vw, 72px); }
-
-  .series + .series { margin-top: 56px; }
+  .listing { padding-block: clamp(40px, 6vw, 68px); }
 
   .series-head {
     display: flex;
@@ -153,9 +153,10 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     color: var(--muted);
   }
 
+  .index { list-style: none; padding: 0; margin: 0; }
   .index a {
     display: grid;
-    grid-template-columns: 4ch 1fr auto;
+    grid-template-columns: 1fr auto;
     align-items: start;
     gap: 20px;
     padding-block: 22px;
@@ -164,18 +165,7 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     color: inherit;
   }
 
-  .part {
-    font-family: var(--mono);
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--rule);
-    font-variant-numeric: tabular-nums;
-    line-height: 1.1;
-    transition: color .18s ease;
-  }
-
   .body { display: flex; flex-direction: column; gap: 5px; }
-
   .t {
     font-family: var(--mono);
     font-size: clamp(17px, 2vw, 21px);
@@ -185,7 +175,6 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     line-height: 1.2;
     transition: color .18s ease;
   }
-
   .sub {
     font-size: 16.5px;
     line-height: 1.5;
@@ -193,7 +182,6 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     max-width: 62ch;
     text-wrap: pretty;
   }
-
   .meta {
     font-family: var(--mono);
     font-size: 10.5px;
@@ -202,29 +190,21 @@ const series = [...new Set(posts.map((p) => p.data.series))].map((name) => ({
     color: var(--muted);
     margin-top: 2px;
   }
-
   .go {
     font-family: var(--mono);
     color: var(--rule);
     padding-top: 4px;
     transition: color .18s ease, transform .18s ease;
   }
-
-  .index a:hover .part,
   .index a:hover .t,
   .index a:hover .go,
-  .index a:focus-visible .part,
   .index a:focus-visible .t,
-  .index a:focus-visible .go {
-    color: var(--accent);
-  }
+  .index a:focus-visible .go { color: var(--accent); }
   .index a:hover .go,
-  .index a:focus-visible .go {
-    transform: translateX(4px);
-  }
+  .index a:focus-visible .go { transform: translateX(4px); }
 
   @media (max-width: 640px) {
-    .index a { grid-template-columns: 3ch 1fr; }
     .go { display: none; }
+    .index a { grid-template-columns: 1fr; }
   }
 </style>
