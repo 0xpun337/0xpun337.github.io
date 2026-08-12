@@ -1,0 +1,138 @@
+---
+/** Ambient logic-analyser band for the index hero.
+ *
+ *  Driven by the same simulation as the post figures — the drain rate breathes
+ *  in and out, so stalls ripple through the channels periodically. It isn't
+ *  decoration: it's the site's actual subject, idling. */
+---
+
+<div class="hero-signal">
+  <canvas
+    data-signal
+    height="150"
+    role="img"
+    aria-label="Ambient trace of a five-stage pipeline. Each row is one stage; solid marks work, red marks a stall as backpressure ripples upstream."
+  ></canvas>
+</div>
+
+<script>
+  import { STAGES, initState, step, type SimParams } from '../scripts/pipeline-sim';
+
+  const TRACE = 220;
+  const HEIGHT = 150;
+
+  function initSignal(canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let C: Record<string, string> = {};
+    const readTokens = () => {
+      const s = getComputedStyle(document.documentElement);
+      const g = (n: string) => s.getPropertyValue(n).trim();
+      C = {
+        scan: g('--ch-scan'), io: g('--ch-io'), cpu: g('--ch-cpu'),
+        db: g('--ch-db'), stall: g('--ch-stall'),
+        muted: g('--muted'), ruleSoft: g('--rule-soft'),
+        mono: getComputedStyle(document.body).getPropertyValue('--mono').trim(),
+      };
+    };
+    readTokens();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+    new MutationObserver(readTokens).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    const params: SimParams = { depth: 10, drain: 9, workers: 4 };
+    const state = initState();
+    const trace = STAGES.map(() => new Array<number>(TRACE).fill(0));
+
+    let elapsed = 0;
+    let acc = 0;
+    let last = 0;
+
+    function advance(dt: number) {
+      elapsed += dt;
+      // Breathe: drain swings between ~2/s and ~16/s on a slow cycle, so the
+      // band cycles through healthy, saturating, and stalled.
+      params.drain = 9 + 7 * Math.sin(elapsed / 7);
+      step(state, params, dt);
+
+      acc += dt;
+      if (acc >= 0.05) {
+        acc = 0;
+        for (let i = 0; i < STAGES.length; i++) {
+          trace[i].shift();
+          trace[i].push(state[i].stalled ? 2 : state[i].credit > 0 || state[i].q > 0 ? 1 : 0);
+        }
+      }
+    }
+
+    function draw() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const W = canvas.clientWidth;
+      if (!W) return;
+      if (canvas.width !== Math.round(W * dpr)) {
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(HEIGHT * dpr);
+      }
+      canvas.style.height = HEIGHT + 'px';
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, W, HEIGHT);
+
+      const n = STAGES.length;
+      const rowH = HEIGHT / n;
+      const labelW = 74;
+      const tw = W - labelW;
+      const cw = tw / TRACE;
+
+      for (let i = 0; i < n; i++) {
+        const y = i * rowH;
+
+        ctx!.fillStyle = C.muted;
+        ctx!.font = `9px ${C.mono}`;
+        ctx!.textAlign = 'left';
+        ctx!.fillText(STAGES[i].name, 0, y + rowH / 2 + 3);
+
+        ctx!.strokeStyle = C.ruleSoft;
+        ctx!.lineWidth = 1;
+        ctx!.beginPath();
+        ctx!.moveTo(labelW, y + rowH - 0.5);
+        ctx!.lineTo(W, y + rowH - 0.5);
+        ctx!.stroke();
+
+        const barH = rowH * 0.5;
+        const by = y + (rowH - barH) / 2;
+        for (let k = 0; k < TRACE; k++) {
+          const v = trace[i][k];
+          if (v === 0) continue;
+          // Fade toward the left edge so the band reads as scrolling history.
+          const fade = Math.min(1, (k / TRACE) * 1.6);
+          ctx!.fillStyle = v === 2 ? C.stall : C[STAGES[i].key];
+          ctx!.globalAlpha = (v === 2 ? 0.85 : 0.5) * fade;
+          ctx!.fillRect(labelW + k * cw, by, Math.max(1, cw - 0.5), barH);
+        }
+        ctx!.globalAlpha = 1;
+      }
+    }
+
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      advance(dt);
+      draw();
+      requestAnimationFrame(frame);
+    }
+
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      for (let i = 0; i < 600; i++) advance(0.05);
+      draw();
+      addEventListener('resize', draw);
+    } else {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  document.querySelectorAll<HTMLCanvasElement>('canvas[data-signal]').forEach(initSignal);
+</script>

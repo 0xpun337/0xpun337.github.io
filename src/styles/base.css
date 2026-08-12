@@ -4,7 +4,12 @@
 *, *::before, *::after { box-sizing: border-box; }
 body, h1, h2, h3, p, ul, ol, figure, dl, dd { margin: 0; padding: 0; }
 ul, ol { list-style: none; }
-img, canvas, svg { display: block; max-width: 100%; }
+img, svg { display: block; max-width: 100%; }
+
+/* Canvas MUST take its width from CSS, not from its own width attribute.
+   Without this the script's DPR sizing feeds back into layout and the
+   drawing coordinate system ends up disagreeing with the element box. */
+canvas { display: block; width: 100%; }
 
 body {
   background: var(--ground);
@@ -187,7 +192,12 @@ code:not(pre code) {
   padding: .08em .34em;
 }
 
-/* Shiki output — wide code scrolls inside its own box, never the page. */
+/* Shiki output — wide code scrolls inside its own box, never the page.
+   astro.config sets `defaultColor: false`, so Shiki emits --shiki-light and
+   --shiki-dark custom properties instead of baking one theme into inline
+   styles. These rules pick the right one. The background deliberately comes
+   from our own surface token, not the syntax theme's, so the code block sits
+   on the same ground as the rest of the page in both themes. */
 .astro-code {
   border: 1px solid var(--rule);
   border-radius: 4px;
@@ -196,6 +206,26 @@ code:not(pre code) {
   font-size: 13.5px;
   line-height: 1.62;
   tab-size: 4;
+  background-color: var(--surface-2) !important;
+}
+.astro-code, .astro-code span { color: var(--shiki-light); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .astro-code,
+  :root:not([data-theme="light"]) .astro-code span {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style);
+    font-weight: var(--shiki-dark-font-weight);
+    text-decoration: var(--shiki-dark-text-decoration);
+  }
+}
+
+:root[data-theme="dark"] .astro-code,
+:root[data-theme="dark"] .astro-code span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
 }
 
 /* ─── figures ───
