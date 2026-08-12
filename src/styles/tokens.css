@@ -28,6 +28,15 @@
 
   --shadow: 0 1px 2px rgba(20, 23, 29, .06), 0 8px 24px rgba(20, 23, 29, .06);
 
+  /* The mascot is not data, so it gets its own colours rather than borrowing
+     the channel palette's meanings. */
+  --mascot-line: #17331F;
+  --mascot-body: #2F7D4F;
+  --mascot-hi:   #49A96B;
+  --mascot-eye:  #FFF6E0;
+  --mascot-tooth:#FFFFFF;
+  --mascot-ram:  #1E5FA8;
+
   --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Source Serif 4", Georgia, "Times New Roman", serif;
 
@@ -56,6 +65,13 @@
     --accent:     var(--ch-b);
     --accent-ink: #0E1116;
 
+    --mascot-line: #0C2113;
+    --mascot-body: #358E59;
+    --mascot-hi:   #59C77D;
+    --mascot-eye:  #FFF6E0;
+    --mascot-tooth:#FFFFFF;
+    --mascot-ram:  #5B9BE0;
+
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
   }
 }
@@ -78,6 +94,13 @@
 
   --accent:     var(--ch-b);
   --accent-ink: #0E1116;
+
+  --mascot-line: #0C2113;
+  --mascot-body: #358E59;
+  --mascot-hi:   #59C77D;
+  --mascot-eye:  #FFF6E0;
+  --mascot-tooth:#FFFFFF;
+  --mascot-ram:  #5B9BE0;
 
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
 }

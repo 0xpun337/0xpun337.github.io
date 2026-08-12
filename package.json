@@ -19,7 +19,9 @@
     "astro": "^7.2.1"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.10",
     "pagefind": "^1.5.2",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }
 }

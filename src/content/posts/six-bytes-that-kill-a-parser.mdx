@@ -10,6 +10,7 @@ tags: [Rust, Parsers, Binary formats, Security]
 ---
 
 import AxdrDecoder from '../../components/figures/AxdrDecoder.astro';
+import MascotCue from '../../components/MascotCue.astro';
 
 Here is a complete, well-formed A-XDR array header:
 
@@ -22,7 +23,7 @@ Here is a complete, well-formed A-XDR array header:
 
 Six bytes. It declares an array of four billion elements and then stops. There is no element data because there is no seventh byte.
 
-A decoder written the obvious way reads that count, calls the equivalent of `Vec::with_capacity(4_294_967_295)`, and dies before it has looked at a single element. You don't need a vulnerability for this. You need a device with flaky firmware, a truncated write, or one corrupted byte in transit — and then a length field that says something enormous.
+A decoder written the obvious way reads that count, calls the equivalent of `Vec::with_capacity(4_294_967_295)`, and dies before it has looked at a single element. You don't need a vulnerability for this. You need a device with flaky firmware, a truncated write, or one corrupted byte in transit — and then a length field that says something enormous. <MascotCue act="devour" />
 
 ## <span class="num">01</span> The threat model is boring, which is the problem
 
@@ -50,7 +51,7 @@ The fix for the six-byte bomb is one method call:
 let mut items = Vec::with_capacity(count.min(1024));
 ```
 
-`count` comes from the wire, so it is the sender's opinion, not a fact. Clamping the *reservation* to 1024 breaks the link between what the header claims and what the process allocates. An honest array of 50,000 elements still decodes fine — the `Vec` grows as elements are actually read, amortised, the way it always does. A dishonest array of four billion allocates 1024 slots, reads zero elements, and hits `UnexpectedEof` on the first one.
+`count` comes from the wire, so it is the sender's opinion, not a fact. Clamping the *reservation* to 1024 breaks the link between what the header claims and what the process allocates. <MascotCue act="sated" /> An honest array of 50,000 elements still decodes fine — the `Vec` grows as elements are actually read, amortised, the way it always does. A dishonest array of four billion allocates 1024 slots, reads zero elements, and hits `UnexpectedEof` on the first one.
 
 <p class="note"><b>The general rule</b>A length prefix is a claim, not a promise. It may size a loop. It must never size an allocation.</p>
 
@@ -70,7 +71,7 @@ if depth + 1 > DEFAULT_MAX_DEPTH {
 
 <p class="note"><b>Why a stack overflow is the worst failure</b>It isn't catchable. In Rust it aborts the process — so one malformed frame takes down every other file in flight. Not an <code>Err</code> you can quarantine.</p>
 
-Thirty-two is generous. Real COSEM structures run three or four levels deep; the deepest thing I've seen in the field was seven. The guard has never once rejected a legitimate frame, which is the correct amount of drama for a safety limit.
+Thirty-two is generous. <MascotCue act="watch" /> Real COSEM structures run three or four levels deep; the deepest thing I've seen in the field was seven. The guard has never once rejected a legitimate frame, which is the correct amount of drama for a safety limit.
 
 ## <span class="num">04</span> Length arithmetic is arithmetic, and arithmetic overflows
 

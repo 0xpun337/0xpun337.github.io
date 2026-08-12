@@ -1,0 +1,228 @@
+---
+/** A small pixel dragon that watches what you're reading.
+ *
+ *  Posts change its behaviour by dropping <MascotCue act="..."/> inline; when
+ *  the cue scrolls into view the dragon switches act. Idle it dozes, so it
+ *  never competes with the prose. */
+---
+
+<aside class="mascot" data-mascot hidden>
+  <button class="mascot-close" type="button" data-close aria-label="Dismiss the dragon">×</button>
+  <canvas data-mascot-canvas width="220" height="150" role="img" aria-label="A small pixel dragon reacting to the section you are reading."></canvas>
+  <p class="mascot-say" data-say></p>
+</aside>
+
+<script>
+  import {
+    HEAD, JAW, HEAD_W, JAW_W,
+    initMascot, setAct, stepMascot, formatEaten,
+    DEFAULT_PARAMS, type Act,
+  } from '../scripts/mascot';
+
+  const SAY: Record<Act, string> = {
+    sleep: '',
+    watch: 'watching',
+    devour: 'nom',
+    sated: 'urp',
+  };
+
+  function initDragon(root: HTMLElement) {
+    const canvas = root.querySelector<HTMLCanvasElement>('[data-mascot-canvas]')!;
+    const say = root.querySelector<HTMLElement>('[data-say]')!;
+    const closeBtn = root.querySelector<HTMLButtonElement>('[data-close]')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // If they've dismissed it before, respect that and never show up again.
+    if (localStorage.getItem('mascot-dismissed') === '1') return;
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const state = initMascot();
+
+    let C: Record<string, string> = {};
+    const readTokens = () => {
+      const s = getComputedStyle(document.documentElement);
+      const g = (n: string) => s.getPropertyValue(n).trim();
+      C = {
+        o: g('--mascot-line'), b: g('--mascot-body'), h: g('--mascot-hi'),
+        e: g('--mascot-eye'), p: g('--mascot-line'), t: g('--mascot-tooth'),
+        n: g('--mascot-line'), ram: g('--mascot-ram'),
+        muted: g('--muted'), mono: getComputedStyle(document.body).getPropertyValue('--mono').trim(),
+      };
+    };
+    readTokens();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+    new MutationObserver(readTokens).observe(document.documentElement, {
+      attributes: true, attributeFilter: ['data-theme'],
+    });
+
+    const PX = 5; // sprite pixel size on screen
+    const OX = 14; // where the sprite sits inside the canvas
+    const OY = 42;
+
+    function sprite(rows: string[], w: number, ox: number, oy: number, squashY = 1) {
+      for (let y = 0; y < rows.length; y++) {
+        for (let x = 0; x < w; x++) {
+          const k = rows[y][x];
+          if (k === '.') continue;
+          // The eye shuts on a blink; pupil and white both go to body colour.
+          const blinking = state.blink > 0.35 && (k === 'e' || k === 'p');
+          ctx!.fillStyle = blinking ? C.b : C[k] || C.b;
+          ctx!.fillRect(
+            ox + x * PX,
+            oy + y * PX * squashY,
+            PX,
+            Math.ceil(PX * squashY),
+          );
+        }
+      }
+    }
+
+    function draw() {
+      ctx!.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Incoming RAM blocks.
+      for (const b of state.blocks) {
+        const shrink = 1 - b.chewed;
+        const s = b.size * PX * shrink;
+        if (s <= 0.5) continue;
+        ctx!.globalAlpha = 0.55 + 0.45 * shrink;
+        ctx!.fillStyle = C.ram;
+        ctx!.fillRect(OX + b.x * PX - s / 2, OY + b.y * PX - s / 2, s, s);
+        ctx!.globalAlpha = 1;
+      }
+
+      // Breathing: a slow vertical bob, and the belly puffs the head slightly.
+      const bob = reduced ? 0 : Math.sin(state.t * 1.8) * 1.6;
+      const puff = 1 + state.belly * 0.14;
+
+      sprite(HEAD, HEAD_W, OX, OY + bob, puff);
+
+      // Lower jaw hinges down from under the head.
+      const jawDrop = state.jaw * 9;
+      sprite(JAW, JAW_W, OX + PX, OY + bob + HEAD.length * PX * puff - PX * 1.5 + jawDrop, 1);
+
+      // Counter, only once it has actually eaten something.
+      if (state.eaten > 0) {
+        ctx!.fillStyle = C.muted;
+        ctx!.font = `700 11px ${C.mono}`;
+        ctx!.textAlign = 'right';
+        ctx!.fillText(formatEaten(state.eaten) + ' eaten', canvas.width - 6, 16);
+      }
+    }
+
+    let last = 0;
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      stepMascot(state, DEFAULT_PARAMS, dt);
+      draw();
+      requestAnimationFrame(frame);
+    }
+
+    function show(act: Act) {
+      root.hidden = false;
+      setAct(state, act);
+      say.textContent = SAY[act];
+      root.dataset.act = act;
+    }
+
+    // Cues in the prose drive the act. Whichever cue is nearest the middle of
+    // the viewport wins, so scrolling back up behaves too.
+    const cues = Array.from(document.querySelectorAll<HTMLElement>('[data-mascot-cue]'));
+    if (cues.length === 0) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const act = (e.target as HTMLElement).dataset.mascotCue as Act;
+          if (e.isIntersecting) {
+            show(act);
+          } else if (state.act === act && e.boundingClientRect.top > 0) {
+            // Scrolled back above this cue — go quiet again.
+            show('watch');
+          }
+        }
+      },
+      { rootMargin: '-35% 0px -35% 0px' },
+    );
+    cues.forEach((c) => io.observe(c));
+
+    closeBtn.addEventListener('click', () => {
+      localStorage.setItem('mascot-dismissed', '1');
+      root.remove();
+    });
+
+    if (reduced) {
+      // Still show up and still react, just without the bobbing and streaming.
+      draw();
+      const paint = () => { stepMascot(state, DEFAULT_PARAMS, 1 / 30); draw(); };
+      setInterval(paint, 200);
+    } else {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-mascot]').forEach(initDragon);
+</script>
+
+<style>
+  .mascot {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 40;
+    width: 220px;
+    pointer-events: none;
+    animation: mascot-in .45s ease-out;
+  }
+  .mascot[hidden] { display: none; }
+
+  .mascot canvas { width: 220px; height: 150px; }
+
+  .mascot-close {
+    pointer-events: auto;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--rule);
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .18s ease;
+  }
+  .mascot:hover .mascot-close,
+  .mascot-close:focus-visible { opacity: 1; }
+
+  .mascot-say {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    margin: -8px 0 0;
+    min-height: 1.2em;
+  }
+
+  @keyframes mascot-in {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* Get out of the way on small screens — the prose matters more. */
+  @media (max-width: 900px) {
+    .mascot { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mascot { animation: none; }
+  }
+</style>

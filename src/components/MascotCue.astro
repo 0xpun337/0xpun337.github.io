@@ -1,0 +1,30 @@
+---
+/** An invisible marker in the prose. When it reaches the middle of the
+ *  viewport the mascot switches act.
+ *
+ *  Place it INLINE, at the end of the paragraph it should react to:
+ *
+ *      Some paragraph text. <MascotCue act="devour" />
+ *
+ *  Inline matters: `.col` is a grid, so a block-level cue would claim its own
+ *  row and open a visible gap in the prose. As an inline span it has a real
+ *  box for IntersectionObserver but occupies no space.
+ */
+interface Props {
+  act: 'sleep' | 'watch' | 'devour' | 'sated';
+}
+
+const { act } = Astro.props;
+---
+
+<span class="cue" data-mascot-cue={act} aria-hidden="true"></span>
+
+<style>
+  .cue {
+    display: inline-block;
+    width: 0;
+    height: 1em;
+    vertical-align: baseline;
+    overflow: hidden;
+  }
+</style>
