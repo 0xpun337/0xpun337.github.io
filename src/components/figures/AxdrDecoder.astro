@@ -1,0 +1,269 @@
+---
+import Figure from '../Figure.astro';
+import { SAMPLES } from '../../scripts/axdr';
+
+interface Props {
+  label: string;
+  title: string;
+  caption: string;
+}
+
+const { label, title, caption } = Astro.props;
+---
+
+<Figure label={label} title={title}>
+  <div class="axdr" data-axdr>
+    <div class="samples" role="group" aria-label="Hostile input samples">
+      {
+        SAMPLES.map((s, i) => (
+          <button type="button" class="chip" data-sample={s.id} aria-pressed={i === 0 ? 'true' : 'false'}>
+            {s.name}
+          </button>
+        ))
+      }
+    </div>
+
+    <p class="blurb" data-blurb></p>
+
+    <label class="hexlabel">
+      <span>Bytes — edit freely, it decodes as you type</span>
+      <input type="text" class="hexin" data-hex spellcheck="false" autocomplete="off" />
+    </label>
+
+    <div class="bytes" data-bytes aria-live="polite"></div>
+
+    <div class="verdict" data-verdict></div>
+
+    <pre class="tree" data-tree></pre>
+  </div>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>A naive decoder</dt><dd class="small" data-r="naive">—</dd></div>
+      <div><dt>This decoder</dt><dd class="small" data-r="verdict">—</dd></div>
+      <div><dt>Peak nesting</dt><dd data-r="depth">0</dd></div>
+      <div><dt>Largest declared</dt><dd data-r="declared">0</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={caption} />
+</Figure>
+
+<script>
+  import { decode, hex, SAMPLES, type Node } from '../../scripts/axdr';
+
+  function initAxdr(root: HTMLElement) {
+    const q = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const hexIn = q<HTMLInputElement>('[data-hex]');
+    const bytesEl = q<HTMLElement>('[data-bytes]');
+    const verdictEl = q<HTMLElement>('[data-verdict]');
+    const treeEl = q<HTMLElement>('[data-tree]');
+    const blurbEl = q<HTMLElement>('[data-blurb]');
+    const figure = root.closest('figure')!;
+    const rd = (n: string) => figure.querySelector<HTMLElement>(`[data-r="${n}"]`)!;
+
+    let current = SAMPLES[0];
+
+    const toHexString = (b: Uint8Array) =>
+      Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(' ');
+
+    function renderTree(n: Node, depth = 0): string {
+      const pad = '  '.repeat(depth);
+      const head = `${pad}${n.name.padEnd(14)} @${String(n.offset).padStart(3)}  ${n.repr}`;
+      if (!n.children?.length) return head;
+      return [head, ...n.children.map((c) => renderTree(c, depth + 1))].join('\n');
+    }
+
+    function render() {
+      const buf = hex(hexIn.value);
+      const result = decode(buf);
+
+      // Byte grid. Innermost span wins, so payload beats the container that
+      // encloses it.
+      const kindAt = new Array<string>(buf.length).fill('');
+      const depthAt = new Array<number>(buf.length).fill(0);
+      for (const s of result.spans) {
+        for (let i = s.start; i < Math.min(s.end, buf.length); i++) {
+          if (s.kind === 'error' || s.depth >= depthAt[i]) {
+            kindAt[i] = s.kind;
+            depthAt[i] = s.depth;
+          }
+        }
+      }
+      const errAt = result.ok ? -1 : result.offset;
+
+      bytesEl.innerHTML = '';
+      if (buf.length === 0) {
+        bytesEl.textContent = 'no bytes';
+      }
+      buf.forEach((b, i) => {
+        const cell = document.createElement('span');
+        cell.className = `by k-${kindAt[i] || 'none'}${i === errAt ? ' err' : ''}`;
+        cell.textContent = b.toString(16).padStart(2, '0');
+        cell.title = `offset ${i}`;
+        bytesEl.appendChild(cell);
+      });
+      // The error can point one past the end (truncated input) — show that.
+      if (!result.ok && errAt >= buf.length) {
+        const cell = document.createElement('span');
+        cell.className = 'by err ghost';
+        cell.textContent = '··';
+        cell.title = `offset ${errAt} — past end of input`;
+        bytesEl.appendChild(cell);
+      }
+
+      if (result.ok) {
+        verdictEl.className = 'verdict ok';
+        verdictEl.textContent = 'Decoded — structure fully consumed, no bytes left over.';
+        treeEl.textContent = renderTree(result.root);
+        rd('verdict').textContent = 'decoded';
+        rd('verdict').className = 'small';
+      } else {
+        verdictEl.className = 'verdict bad';
+        verdictEl.innerHTML =
+          `<strong>${result.kind}</strong> at offset ${result.offset}<br><span>${result.message}</span>`;
+        treeEl.textContent = 'rejected before producing a value';
+        rd('verdict').textContent = 'rejected · ' + result.kind;
+        rd('verdict').className = 'small warn';
+      }
+
+      rd('depth').textContent = String(result.maxDepth);
+      rd('declared').textContent = result.maxDeclared.toLocaleString();
+      rd('naive').textContent = current.naive;
+    }
+
+    function select(id: string) {
+      const s = SAMPLES.find((x) => x.id === id);
+      if (!s) return;
+      current = s;
+      hexIn.value = toHexString(s.bytes);
+      blurbEl.textContent = s.blurb;
+      root.querySelectorAll<HTMLButtonElement>('[data-sample]').forEach((b) =>
+        b.setAttribute('aria-pressed', String(b.dataset.sample === id)),
+      );
+      render();
+    }
+
+    root.querySelectorAll<HTMLButtonElement>('[data-sample]').forEach((b) =>
+      b.addEventListener('click', () => select(b.dataset.sample!)),
+    );
+    hexIn.addEventListener('input', () => {
+      // Hand-edited bytes are no longer the named sample.
+      current = { ...current, naive: 'unknown — your bytes' };
+      render();
+    });
+
+    select(SAMPLES[0].id);
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-axdr]').forEach(initAxdr);
+</script>
+
+<style is:global>
+  .axdr { display: flex; flex-direction: column; gap: 14px; }
+
+  .axdr .samples { display: flex; flex-wrap: wrap; gap: 7px; }
+
+  .axdr .chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 7px 11px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .axdr .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .axdr .chip[aria-pressed='true'] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .axdr .blurb {
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 78ch;
+  }
+
+  .axdr .hexlabel { display: flex; flex-direction: column; gap: 6px; }
+  .axdr .hexlabel > span {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .axdr .hexin {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--ink);
+    width: 100%;
+  }
+  .axdr .hexin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .axdr .bytes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .axdr .by {
+    padding: 5px 6px;
+    border-radius: 2px;
+    border: 1px solid transparent;
+    color: var(--ink);
+    background: var(--surface-2);
+  }
+  /* Tag / length / payload get the channel palette, so the byte roles read the
+     same way stage colours do elsewhere on the site. */
+  .axdr .k-tag     { background: color-mix(in srgb, var(--ch-cpu) 22%, transparent); color: var(--ch-cpu); }
+  .axdr .k-length  { background: color-mix(in srgb, var(--ch-io) 22%, transparent);  color: var(--ch-io); }
+  .axdr .k-payload { background: color-mix(in srgb, var(--ch-db) 20%, transparent);  color: var(--ch-db); }
+  .axdr .by.err {
+    background: var(--ch-stall);
+    border-color: var(--ch-stall);
+    color: var(--surface);
+    font-weight: 700;
+  }
+  .axdr .by.ghost { opacity: .75; }
+
+  .axdr .verdict {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 11px 13px;
+    border-radius: 3px;
+    border-left: 3px solid var(--rule);
+    background: var(--surface-2);
+  }
+  .axdr .verdict.ok  { border-left-color: var(--ch-db); color: var(--ch-db); }
+  .axdr .verdict.bad { border-left-color: var(--ch-stall); color: var(--ch-stall); }
+  .axdr .verdict span { color: var(--muted); }
+
+  .axdr .tree {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 12px;
+    overflow-x: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    color: var(--ink-2);
+    white-space: pre;
+  }
+
+  .readout dd.small { font-size: 12.5px; line-height: 1.4; font-weight: 700; }
+</style>

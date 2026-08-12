@@ -1,0 +1,196 @@
+---
+title: Six bytes that kill a parser
+deck: An array header claiming four billion elements, and nothing after it. Writing an A-XDR decoder for input you don't control, and the five guards that decide whether it survives contact with the field.
+series: Push Pipeline
+part: 2
+partsTotal: 6
+published: 2026-08-13
+readingMinutes: 12
+tags: [Rust, Parsers, Binary formats, Security]
+---
+
+import AxdrDecoder from '../../components/figures/AxdrDecoder.astro';
+
+Here is a complete, well-formed A-XDR array header:
+
+```text
+01 84 ff ff ff ff
+│  │  └───────────  length: 4,294,967,295
+│  └──────────────  long form, 4 length bytes follow
+└─────────────────  tag 0x01 — array
+```
+
+Six bytes. It declares an array of four billion elements and then stops. There is no element data because there is no seventh byte.
+
+A decoder written the obvious way reads that count, calls the equivalent of `Vec::with_capacity(4_294_967_295)`, and dies before it has looked at a single element. You don't need a vulnerability for this. You need a device with flaky firmware, a truncated write, or one corrupted byte in transit — and then a length field that says something enormous.
+
+## <span class="num">01</span> The threat model is boring, which is the problem
+
+I'm not defending against an attacker. I'm defending against **the field**: devices from multiple vendors, firmware revisions I didn't write and can't test against, radio links that truncate, and a long tail of units that were commissioned wrong three years ago and have been quietly sending malformed frames ever since.
+
+<p class="note"><b>Why it matters more, not less</b>An attacker probes once. The field sends you malformed input continuously, forever, at volume — and expects the process to still be alive tomorrow.</p>
+
+That changes the design goal. It isn't "reject bad input". It's **never let bad input cost more than good input**. A malformed frame must be cheap: no large allocation, no deep recursion, no scan proportional to a number the sender picked. Fail in bounded time, say precisely where, move on.
+
+So: attack it yourself. The decoder below is a faithful port of the real one — same length codec, same guards, same error variants and byte offsets. Pick a hostile sample, or type your own bytes into the field:
+
+<AxdrDecoder
+  label="Fig. 2.1"
+  title="A-XDR decoder — hostile input playground"
+  caption="Byte roles use the site's channel palette: <b>violet is a type tag</b>, <b>blue is a length field</b>, <b>green is payload</b>, and the red cell is exactly where decoding stopped. The <b>naive decoder</b> readout is what the obvious implementation does with the same bytes. Edit the hex directly — malformed input is the interesting case."
+/>
+
+Every guard below corresponds to one of those samples.
+
+## <span class="num">02</span> Never let a declared count drive an allocation
+
+The fix for the six-byte bomb is one method call:
+
+```rust
+let mut items = Vec::with_capacity(count.min(1024));
+```
+
+`count` comes from the wire, so it is the sender's opinion, not a fact. Clamping the *reservation* to 1024 breaks the link between what the header claims and what the process allocates. An honest array of 50,000 elements still decodes fine — the `Vec` grows as elements are actually read, amortised, the way it always does. A dishonest array of four billion allocates 1024 slots, reads zero elements, and hits `UnexpectedEof` on the first one.
+
+<p class="note"><b>The general rule</b>A length prefix is a claim, not a promise. It may size a loop. It must never size an allocation.</p>
+
+What I like about this guard is that it costs nothing to be right. There is no validation pass, no configured maximum message size to tune, no rejection of legitimately large input. The pathological case simply stops being able to reach the allocator.
+
+## <span class="num">03</span> Recursion needs a ceiling, and the format won't give you one
+
+A-XDR containers nest. Arrays hold structures hold arrays, and the encoding has no opinion about how deep that goes. A recursive-descent decoder maps that nesting directly onto the call stack, which means the sender chooses your stack depth:
+
+```rust
+if depth + 1 > DEFAULT_MAX_DEPTH {
+    return Err(AxdrError::DepthExceeded { offset: base, max: DEFAULT_MAX_DEPTH });
+}
+```
+
+`DEFAULT_MAX_DEPTH` is 32. Two bytes per level means a 200-byte payload can nest 100 deep; a few kilobytes can exhaust any stack you care to give it.
+
+<p class="note"><b>Why a stack overflow is the worst failure</b>It isn't catchable. In Rust it aborts the process — so one malformed frame takes down every other file in flight. Not an <code>Err</code> you can quarantine.</p>
+
+Thirty-two is generous. Real COSEM structures run three or four levels deep; the deepest thing I've seen in the field was seven. The guard has never once rejected a legitimate frame, which is the correct amount of drama for a safety limit.
+
+## <span class="num">04</span> Length arithmetic is arithmetic, and arithmetic overflows
+
+Long-form lengths accumulate byte by byte, and that accumulation is a shift and an add — both of which wrap:
+
+```rust
+let mut value = 0usize;
+for &b in &input[1..1 + count] {
+    value = value
+        .checked_shl(8)
+        .and_then(|v| v.checked_add(b as usize))
+        .ok_or(AxdrError::LengthOverflow { offset: base_offset })?;
+}
+```
+
+Unchecked, eight bytes of `0xFF` wrap around to a small, plausible-looking number. That's worse than a huge one: a huge length gets caught by the next guard, while a wrapped length sails through and you read the wrong region of the buffer with total confidence.
+
+There's a second, quieter check just above it:
+
+```rust
+if count == 0 || count > core::mem::size_of::<usize>() {
+    return Err(AxdrError::InvalidLength { offset: base_offset, byte: first });
+}
+```
+
+`0x80` means "long form, zero length bytes follow", which is meaningless. `0x8F` claims fifteen length bytes, which cannot fit a `usize`. Both are malformed encodings rather than large values, and rejecting them here means the loop below can't be handed something it wasn't built for.
+
+## <span class="num">05</span> A declared length is checked against what exists
+
+```rust
+let body = &after[c..];
+if body.len() < len {
+    return Err(AxdrError::LengthPastEnd {
+        offset: after_off + c,
+        declared: len,
+        available: body.len(),
+    });
+}
+let (bytes, rest) = body.split_at(len);
+```
+
+This is the over-read, and in C it's the whole ballgame — `memcpy(dst, src, declared_len)` walking straight off the end of the buffer. In Rust `split_at` would panic instead of reading out of bounds, which is safe but still fatal to the process, and a panic tells you nothing useful.
+
+<p class="note"><b>Safe is not the same as correct</b>Rust turns the over-read into an abort. That is a real improvement and still an outage. The explicit check turns it into an <code>Err</code> with the declared length, the available length, and the offset.</p>
+
+Note what the error carries: `declared: 200, available: 4`. When this shows up in a log at 3am, the numbers tell you immediately whether you're looking at a truncated transmission or a device that miscounts — a distinction you'd otherwise spend an hour on.
+
+## <span class="num">06</span> Trailing bytes are an error
+
+```rust
+let (v, rest) = decode_value(input, 0, 0)?;
+if !rest.is_empty() {
+    return Err(AxdrError::TrailingBytes {
+        offset: input.len() - rest.len(),
+        remaining: rest.len(),
+    });
+}
+```
+
+This is the guard that feels pedantic and isn't. Leftover bytes mean the decoder and the sender disagree about where the frame ends. Maybe two frames got concatenated. Maybe a field is longer in a firmware revision I haven't modelled. Maybe I got the format wrong.
+
+All three are things I want to know about. Ignoring the tail means the first two silently produce partial data, and the third never gets found. Strictness here is how a format bug surfaces as a clear error rather than as a slow drift in data quality that someone notices six months later.
+
+## <span class="num">07</span> Borrow, don't copy
+
+The decoded value borrows its payload straight out of the input buffer:
+
+```rust
+pub enum Value<'a> {
+    OctetString(&'a [u8]),
+    VisibleString(&'a [u8]),
+    Utf8String(&'a [u8]),
+    BitString { bits: usize, bytes: &'a [u8] },
+    // ...scalars are Copy, containers are Vec<Value<'a>>
+}
+```
+
+That `'a` is doing real work. A frame with a dozen octet-strings decodes with zero allocations for the string data — the `Value` tree just points into bytes that already exist. The lifetime makes it impossible to hold a decoded value past the buffer it came from, so the whole class of use-after-free this would be in C is a compile error instead.
+
+<p class="note"><b>The tradeoff</b>You cannot stash a <code>Value&lt;'a&gt;</code> in a struct that outlives the read. That is the constraint, and it is the right one — it forces you to decide what to keep at parse time rather than keeping everything by default.</p>
+
+Scalars still decode to owned values because they're `Copy` and smaller than a pointer. Copying four bytes is cheaper than the indirection to avoid it.
+
+## <span class="num">08</span> What the library refuses to do
+
+The header comment on `lib.rs` is a list of things this crate will not do, and those constraints shaped it more than the features did:
+
+**No meter-domain logic.** Bytes in, typed values out. The decoder doesn't know what a bill is. Every attempt to be helpful here — "this looks like a load profile, let me reshape it" — is a place where a firmware variant breaks parsing for a reason nobody can find.
+
+**No key-trial loop.** `Decipher::decipher` takes one key pair and returns plaintext or a precise error. It will not try a list. Key selection is policy, policy belongs to the caller, and a library that silently tries keys until one works is a library that can't tell you *which* key worked.
+
+**Unknown values are preserved, never dropped.** Unmodelled units become `Other(u8)`; unmodelled attribute indices become `Unknown(i8)`. The index is never lost:
+
+```rust
+pub enum AttributeRole {
+    // ...modelled roles
+    Unknown(i8),
+}
+```
+
+This one took a bug to learn. Mapping unknown enum values to a default throws away the only evidence that something new appeared on the network. Preserving them means a new firmware revision shows up as `Other(37)` in the data — visible, greppable, obviously unhandled — instead of quietly becoming a zero.
+
+## <span class="num">09</span> Key once, decipher many
+
+One last thing, because it's the difference between a decoder that keeps up and one that doesn't. AES key expansion is not free, and it does not depend on the message:
+
+```rust
+pub struct Decipher {
+    gcm: GcmCipher,   // keyed with EK once
+    ctr: CtrCipher,   // keyed with EK once
+    ak: SmallVec<[u8; 32]>,
+}
+```
+
+`Decipher::new` runs both key schedules once. `decipher()` then handles many APDUs, where only the security-control byte, the IV, the AAD, and the ciphertext change. The struct is clone-cheap and `Send + Sync`, so it's built at startup and shared across every worker thread in the pool from [part 1](/writing/two-runtimes-one-pipeline/).
+
+<p class="note"><b>The pattern</b>Split "expensive and message-independent" from "cheap and per-message", then hoist the first one to startup. It shows up everywhere once you look: regex compilation, TLS contexts, prepared statements.</p>
+
+Per-call keying would have put an AES key schedule on the hot path of every single frame — invisible in a benchmark that decrypts one message, and roughly a third of decode time at volume.
+
+---
+
+Next: `getdents64`, and the three things `std::fs::read_dir` does on every entry that you never asked for.
