@@ -25,11 +25,11 @@ export interface FireParams {
 }
 
 export const FIRE_DEFAULTS: FireParams = {
-  rate: 140,
-  speed: -120,
-  spread: 26,
-  buoyancy: -18,
-  maxEmbers: 260,
+  rate: 260,
+  speed: -210,
+  spread: 52,
+  buoyancy: -30,
+  maxEmbers: 520,
 };
 
 export interface FireState {
@@ -71,12 +71,12 @@ export function stepFire(
       const spread = (rand() - 0.5) * p.spread;
       s.embers.push({
         x: mx,
-        y: my + (rand() - 0.5) * 3,
+        y: my + (rand() - 0.5) * 5,
         vx: p.speed * (0.6 + rand() * 0.7),
         vy: spread,
         age: 0,
-        life: 0.5 + rand() * 0.7,
-        size: 2 + rand() * 3.5,
+        life: 0.75 + rand() * 0.95,
+        size: 3.5 + rand() * 6.5,
         heat: 1,
       });
       spawned++;

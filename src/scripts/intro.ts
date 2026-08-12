@@ -53,6 +53,7 @@ export function skipIntro(s: IntroState): void {
 }
 
 const easeIn = (u: number) => u * u * u;
+const easeOut = (u: number) => 1 - (1 - u) * (1 - u);
 
 export function stepIntro(s: IntroState, dt: number): IntroState {
   if (s.phase === 'done') return s;
@@ -81,11 +82,14 @@ export function stepIntro(s: IntroState, dt: number): IntroState {
   } else if (s.t < EXIT_END) {
     s.phase = 'exit';
     const u = (s.t - ROAR_END) / (EXIT_END - ROAR_END);
-    s.scale = SCALE_STEPS[SCALE_STEPS.length - 1];
-    s.x = -easeIn(u) * 1.9;
-    s.alpha = 1 - Math.max(0, (u - 0.55) / 0.45);
-    s.overlay = 1 - u;
-    s.jaw = 1 - u * 0.6;
+    const top = SCALE_STEPS[SCALE_STEPS.length - 1];
+    // Grows as it leaves, so it reads as flying past the camera rather than
+    // sliding off a flat plane.
+    s.scale = top * (1 + easeIn(u) * 0.55);
+    s.x = -easeIn(u) * 2.1;
+    s.alpha = 1 - easeIn(Math.max(0, (u - 0.5) / 0.5));
+    s.overlay = 1 - easeOut(u);
+    s.jaw = 1 - u * 0.5;
   } else {
     s.phase = 'done';
     s.alpha = 0;

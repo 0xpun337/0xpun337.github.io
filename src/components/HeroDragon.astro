@@ -107,10 +107,11 @@
       const bob = reduced ? 0 : Math.sin(t * 1.7) * 2;
 
       // Flame first, so the dragon's head sits on top of its own breath.
+      // Sized relative to the sprite, otherwise it reads as a matchstick.
       for (const em of fire.embers) {
         const [r, g, b, a] = emberColor(em.heat);
         ctx!.fillStyle = `rgba(${r},${g},${b},${a})`;
-        const s = em.size * (0.6 + em.heat * 0.8);
+        const s = em.size * (0.6 + em.heat * 0.8) * (px / 3.2);
         ctx!.fillRect(em.x - s / 2, em.y - s / 2, s, s);
       }
 
@@ -128,7 +129,7 @@
     }
 
     function breathe() {
-      ignite(fire, 0.85);
+      ignite(fire, 1.1);
       jaw = 1;
     }
 

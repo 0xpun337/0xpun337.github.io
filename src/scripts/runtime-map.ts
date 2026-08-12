@@ -12,9 +12,9 @@ export type Phase = 'read' | 'cpu' | 'write' | 'done';
 /** Milliseconds of work each phase costs. Read is a syscall; cpu is
  *  decrypt + parse + validate; write is handing a row to the writer. */
 export const PHASE_MS: Record<Exclude<Phase, 'done'>, number> = {
-  read: 40,
-  cpu: 120,
-  write: 8,
+  read: 55,
+  cpu: 150,
+  write: 20,
 };
 
 export interface Job {

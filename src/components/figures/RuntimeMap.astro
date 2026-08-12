@@ -13,7 +13,7 @@ const { label, title, caption } = Astro.props;
 <Figure label={label} title={title}>
   <canvas
     data-runtime
-    height="270"
+    height="330"
     aria-label="Thread occupancy across three pools. With decrypt and parse offloaded to a pinned Rayon pool the async reactor stays nearly idle; moving that work onto the reactor saturates all of its threads and collapses throughput."
   ></canvas>
 
@@ -49,15 +49,19 @@ const { label, title, caption } = Astro.props;
 
 <script>
   import {
-    DEFAULTS, initRuntime, laneFor, resync, stepRuntime, threadCount, utilisation,
+    DEFAULTS, PHASE_MS, initRuntime, laneFor, resync, stepRuntime, threadCount, utilisation,
     type Lane, type RuntimeParams,
   } from '../../scripts/runtime-map';
 
-  const HEIGHT = 270;
+  const HEIGHT = 330;
+  // Wall-clock is far too fast to read: a 20ms write phase would strobe. Run
+  // the model in slow motion. Rates and utilisation are ratios, so they are
+  // unaffected — only the viewing speed changes.
+  const TIME_SCALE = 0.4;
 
   const LANES: { lane: Lane; label: string; note: string }[] = [
-    { lane: 'blocking', label: 'TOKIO BLOCKING', note: 'file reads — syscalls that block and return' },
-    { lane: 'reactor', label: 'TOKIO REACTOR', note: 'awaits, dispatch, the writer' },
+    { lane: 'blocking', label: 'TOKIO BLOCKING', note: 'blocking file reads' },
+    { lane: 'reactor', label: 'TOKIO REACTOR', note: 'awaits · dispatch · writer' },
     { lane: 'rayon', label: 'RAYON PINNED', note: 'decrypt · parse · validate' },
   ];
 
@@ -133,10 +137,9 @@ const { label, title, caption } = Astro.props;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx!.clearRect(0, 0, W, HEIGHT);
 
-      const labelW = Math.min(168, Math.max(120, W * 0.17));
-      const barW = 74;
+      const barW = 66;
       const laneH = HEIGHT / 3;
-      const slotGap = 5;
+      const slotGap = 6;
 
       LANES.forEach((L, li) => {
         const y = li * laneH;
@@ -144,66 +147,79 @@ const { label, title, caption } = Astro.props;
         const n = Math.max(1, slots.length);
         const util = utilisation(state, L.lane, params);
         const hot = L.lane === 'reactor' && util > 0.8;
+        const isCpuLane = laneFor('cpu', params) === L.lane;
 
+        // Header row: a colour chip, the lane name, then the note. Giving the
+        // labels their own line is what stops the notes running under the
+        // slot track on narrow figures.
         ctx!.textAlign = 'left';
+        ctx!.fillStyle = isCpuLane ? (params.cpuOnReactor ? C.stall : C.cpu) : C.rule;
+        ctx!.fillRect(0, y + 16, 8, 8);
+
         ctx!.fillStyle = hot ? C.stall : C.ink;
         ctx!.font = `700 11px ${C.mono}`;
-        ctx!.fillText(`${L.label} · ${n}`, 0, y + 26);
+        ctx!.fillText(`${L.label} · ${n}`, 14, y + 24);
 
+        const labelEnd = 14 + ctx!.measureText(`${L.label} · ${n}`).width;
         ctx!.fillStyle = C.muted;
         ctx!.font = `9.5px ${C.mono}`;
-        ctx!.fillText(L.note, 0, y + 42);
+        ctx!.fillText(L.note, labelEnd + 14, y + 24);
 
-        // Thread slots.
-        const trackX = labelW;
-        const trackW = W - labelW - barW - 16;
+        // Slot track: full width, on its own row beneath the header.
+        const trackW = W - barW - 14;
         const slotW = Math.max(4, (trackW - slotGap * (n - 1)) / n);
-        const slotH = 26;
-        const sy = y + laneH / 2 - slotH / 2 + 2;
+        const slotH = 30;
+        const sy = y + 38;
 
         for (let i = 0; i < n; i++) {
-          const x = trackX + i * (slotW + slotGap);
+          const x = i * (slotW + slotGap);
           const jobId = slots[i];
           const job = jobId === null ? undefined : state.jobs.find((j) => j.id === jobId);
 
           if (job) {
             const col = phaseColor(job.phase);
+            const total =
+              job.phase === 'read' ? PHASE_MS.read
+              : job.phase === 'cpu' ? PHASE_MS.cpu
+              : PHASE_MS.write;
+            const done = Math.max(0, Math.min(1, 1 - job.left / total));
+
             ctx!.fillStyle = col;
-            ctx!.globalAlpha = 0.85;
+            ctx!.globalAlpha = 0.22;
             ctx!.beginPath();
-            ctx!.roundRect(x, sy, slotW, slotH, 2);
+            ctx!.roundRect(x, sy, slotW, slotH, 3);
+            ctx!.fill();
+
+            // Fill drains left-to-right as the phase completes.
+            ctx!.globalAlpha = 0.9;
+            ctx!.beginPath();
+            ctx!.roundRect(x, sy, Math.max(2, slotW * done), slotH, 3);
             ctx!.fill();
             ctx!.globalAlpha = 1;
-
-            // Progress bar through the current phase.
-            const total = job.phase === 'read' ? 40 : job.phase === 'cpu' ? 120 : 8;
-            const done = Math.max(0, Math.min(1, 1 - job.left / total));
-            ctx!.fillStyle = C.surf2;
-            ctx!.globalAlpha = 0.45;
-            ctx!.fillRect(x + slotW * done, sy, slotW * (1 - done), slotH);
-            ctx!.globalAlpha = 1;
           } else {
-            ctx!.strokeStyle = C.rule;
+            ctx!.strokeStyle = C.ruleSoft;
             ctx!.lineWidth = 1;
             ctx!.beginPath();
-            ctx!.roundRect(x + 0.5, sy + 0.5, slotW - 1, slotH - 1, 2);
+            ctx!.roundRect(x + 0.5, sy + 0.5, slotW - 1, slotH - 1, 3);
             ctx!.stroke();
           }
         }
 
-        // Utilisation bar.
+        // Utilisation bar, right of the track.
         const bx = W - barW;
         ctx!.strokeStyle = C.ruleSoft;
         ctx!.lineWidth = 1;
-        ctx!.strokeRect(bx + 0.5, sy + 0.5, barW - 1, slotH - 1);
+        ctx!.beginPath();
+        ctx!.roundRect(bx + 0.5, sy + 0.5, barW - 1, slotH - 1, 3);
+        ctx!.stroke();
         ctx!.fillStyle = hot ? C.stall : C.muted;
-        ctx!.globalAlpha = 0.5;
+        ctx!.globalAlpha = 0.4;
         ctx!.fillRect(bx + 1, sy + 1, (barW - 2) * util, slotH - 2);
         ctx!.globalAlpha = 1;
         ctx!.fillStyle = hot ? C.stall : C.ink;
-        ctx!.font = `700 10px ${C.mono}`;
+        ctx!.font = `700 11px ${C.mono}`;
         ctx!.textAlign = 'center';
-        ctx!.fillText(Math.round(util * 100) + '%', bx + barW / 2, sy + slotH / 2 + 3.5);
+        ctx!.fillText(Math.round(util * 100) + '%', bx + barW / 2, sy + slotH / 2 + 4);
 
         if (li < LANES.length - 1) {
           ctx!.strokeStyle = C.ruleSoft;
@@ -214,13 +230,6 @@ const { label, title, caption } = Astro.props;
         }
       });
 
-      // Mark where the CPU phase currently lives.
-      const cpuLane = laneFor('cpu', params);
-      const idx = LANES.findIndex((l) => l.lane === cpuLane);
-      if (idx >= 0) {
-        ctx!.fillStyle = params.cpuOnReactor ? C.stall : C.cpu;
-        ctx!.fillRect(0, idx * laneH + 8, 3, laneH - 16);
-      }
     }
 
     function report() {
@@ -243,14 +252,14 @@ const { label, title, caption } = Astro.props;
       if (!last) last = now;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      stepRuntime(state, params, dt);
+      stepRuntime(state, params, dt * TIME_SCALE);
       draw();
       report();
       requestAnimationFrame(frame);
     }
 
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      for (let i = 0; i < 900; i++) stepRuntime(state, params, 1 / 60);
+      for (let i = 0; i < 900; i++) stepRuntime(state, params, (1 / 60) * TIME_SCALE);
       draw();
       report();
       addEventListener('resize', draw);
