@@ -1,0 +1,177 @@
+---
+/** Ghidra-style splash when a post opens: the dragon pops in small, power-ups
+ *  through chunky size steps, roars fire, then rockets off-screen.
+ *
+ *  Deliberately short and always escapable — click, press anything, or just
+ *  wait ~1.1s. Starts hidden and is only revealed by script, so if the JS
+ *  never runs the reader sees the post immediately with no overlay at all. */
+---
+
+<div class="intro" data-intro hidden aria-hidden="true">
+  <canvas data-intro-canvas></canvas>
+  <p class="intro-skip" data-skip-hint>click to skip</p>
+</div>
+
+<script>
+  import { HEAD, JAW, HEAD_W, JAW_W } from '../scripts/dragon-sprite';
+  import { initIntro, stepIntro, skipIntro } from '../scripts/intro';
+  import { initFire, ignite, stepFire, emberColor, FIRE_DEFAULTS } from '../scripts/fire';
+
+  function initSplash(root: HTMLElement) {
+    // Never animate for readers who asked us not to.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      root.remove();
+      return;
+    }
+
+    const canvas = root.querySelector<HTMLCanvasElement>('[data-intro-canvas]')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      root.remove();
+      return;
+    }
+
+    const state = initIntro();
+    const fire = initFire();
+
+    const s = getComputedStyle(document.documentElement);
+    const g = (n: string) => s.getPropertyValue(n).trim();
+    const C: Record<string, string> = {
+      o: g('--mascot-line'), b: g('--mascot-body'), h: g('--mascot-hi'),
+      e: g('--mascot-eye'), p: g('--mascot-line'), t: g('--mascot-tooth'),
+      n: g('--mascot-line'),
+    };
+    const groundRGB = g('--ground');
+
+    let finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      root.remove();
+      document.documentElement.style.removeProperty('overflow');
+    }
+
+    // Belt and braces: whatever happens in the loop, the overlay goes away.
+    const failsafe = setTimeout(finish, 2600);
+
+    root.hidden = false;
+    // Hold the scroll only for the ~1s it plays, so the page can't jump under it.
+    document.documentElement.style.overflow = 'hidden';
+
+    const skip = () => skipIntro(state);
+    root.addEventListener('click', skip);
+    addEventListener('keydown', skip, { once: true });
+    addEventListener('wheel', skip, { once: true, passive: true });
+    addEventListener('touchstart', skip, { once: true, passive: true });
+
+    function draw() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const W = innerWidth;
+      const H = innerHeight;
+      if (canvas.width !== Math.round(W * dpr)) {
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+      }
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, W, H);
+
+      // Backdrop.
+      ctx!.globalAlpha = state.overlay;
+      ctx!.fillStyle = groundRGB;
+      ctx!.fillRect(0, 0, W, H);
+      ctx!.globalAlpha = 1;
+
+      const px = state.scale * (W < 700 ? 2.2 : 3.4);
+      const spriteW = HEAD_W * px;
+      const spriteH = HEAD.length * px;
+      const ox = (W - spriteW) / 2 + state.x * W;
+      const oy = (H - spriteH) / 2;
+
+      // Flame, behind the head.
+      ctx!.globalAlpha = state.alpha;
+      for (const em of fire.embers) {
+        const [r, gg, b, a] = emberColor(em.heat);
+        ctx!.fillStyle = `rgba(${r},${gg},${b},${a * state.alpha})`;
+        const sz = em.size * (0.6 + em.heat * 0.8) * (px / 4);
+        ctx!.fillRect(em.x - sz / 2, em.y - sz / 2, sz, sz);
+      }
+
+      const sprite = (rows: string[], w: number, sx: number, sy: number) => {
+        for (let y = 0; y < rows.length; y++) {
+          for (let x = 0; x < w; x++) {
+            const k = rows[y][x];
+            if (k === '.') continue;
+            ctx!.fillStyle = C[k] || C.b;
+            ctx!.fillRect(sx + x * px, sy + y * px, px + 0.5, px + 0.5);
+          }
+        }
+      };
+
+      sprite(HEAD, HEAD_W, ox, oy);
+      sprite(JAW, JAW_W, ox + px, oy + spriteH - px * 1.5 + state.jaw * px * 1.8);
+      ctx!.globalAlpha = 1;
+    }
+
+    let last = 0;
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+
+      stepIntro(state, dt);
+      if (state.justRoared) ignite(fire, 0.55);
+
+      const W = innerWidth;
+      const H = innerHeight;
+      const px = state.scale * (W < 700 ? 2.2 : 3.4);
+      const mouthX = (W - HEAD_W * px) / 2 + state.x * W + px * 1.2;
+      const mouthY = H / 2 + px * 2.5;
+      stepFire(fire, FIRE_DEFAULTS, dt, mouthX, mouthY);
+
+      draw();
+
+      if (state.phase === 'done') {
+        clearTimeout(failsafe);
+        finish();
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-intro]').forEach(initSplash);
+</script>
+
+<style>
+  .intro {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    cursor: pointer;
+  }
+  .intro[hidden] { display: none; }
+  .intro canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .intro-skip {
+    position: absolute;
+    left: 50%;
+    bottom: 8%;
+    transform: translateX(-50%);
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    opacity: 0;
+    animation: intro-hint .4s ease-out .45s forwards;
+  }
+  @keyframes intro-hint {
+    to { opacity: 1; }
+  }
+</style>

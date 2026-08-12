@@ -2,6 +2,7 @@
 import Base from './Base.astro';
 import type { CollectionEntry } from 'astro:content';
 import Mascot from '../components/Mascot.astro';
+import PostIntro from '../components/PostIntro.astro';
 
 interface Props {
   post: CollectionEntry<'posts'>;
@@ -13,6 +14,7 @@ const date = d.published.toLocaleDateString('en-GB', { year: 'numeric', month: '
 ---
 
 <Base title={`${d.title} — 0xpun337`} description={d.deck}>
+  <PostIntro />
   <article>
     <div class="wrap">
       <div class="col">
