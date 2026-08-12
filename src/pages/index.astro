@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
-import Crackme from '../components/Crackme.astro';
+import HeroDragon from '../components/HeroDragon.astro';
 
 const posts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
   (a, b) => +b.data.published - +a.data.published,
@@ -35,7 +35,7 @@ const FIELDS = [
         {FIELDS.map((f) => <li>{f}</li>)}
       </ul>
 
-      <Crackme />
+      <HeroDragon />
     </div>
   </section>
 

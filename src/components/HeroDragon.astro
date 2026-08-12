@@ -1,0 +1,218 @@
+---
+/** The dragon that sits under the wordmark.
+ *
+ *  Its own thing — it tracks your cursor, and it breathes fire when you poke
+ *  it. Shares only the artwork with the in-post mascot, never the behaviour. */
+---
+
+<div class="hd" data-hd>
+  <canvas
+    data-hd-canvas
+    height="200"
+    role="img"
+    aria-label="A pixel dragon. It follows your cursor, and breathes fire when clicked."
+  ></canvas>
+  <button class="hd-poke" type="button" data-poke>poke it</button>
+</div>
+
+<script>
+  import { HEAD, JAW, HEAD_W, JAW_W } from '../scripts/dragon-sprite';
+  import { initFire, ignite, stepFire, emberColor, FIRE_DEFAULTS } from '../scripts/fire';
+
+  function initHero(root: HTMLElement) {
+    const canvas = root.querySelector<HTMLCanvasElement>('[data-hd-canvas]')!;
+    const poke = root.querySelector<HTMLButtonElement>('[data-poke]')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const fire = initFire();
+
+    let C: Record<string, string> = {};
+    const readTokens = () => {
+      const s = getComputedStyle(document.documentElement);
+      const g = (n: string) => s.getPropertyValue(n).trim();
+      C = {
+        o: g('--mascot-line'), b: g('--mascot-body'), h: g('--mascot-hi'),
+        e: g('--mascot-eye'), p: g('--mascot-line'), t: g('--mascot-tooth'),
+        n: g('--mascot-line'), rule: g('--rule-soft'),
+      };
+    };
+    readTokens();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+    new MutationObserver(readTokens).observe(document.documentElement, {
+      attributes: true, attributeFilter: ['data-theme'],
+    });
+
+    let t = 0;
+    let blink = 0;
+    let nextBlink = 3;
+    let jaw = 0;
+    // Where the cursor is, in canvas coordinates.
+    let cx = 0;
+    let cy = 0;
+    let hasPointer = false;
+
+    const PX = () => (canvas.clientWidth < 520 ? 6 : 9);
+
+    function geometry() {
+      const px = PX();
+      const w = HEAD_W * px;
+      const h = HEAD.length * px;
+      // Sits on the right, so the flame has the full width to travel across.
+      const ox = canvas.clientWidth - w - px * 2;
+      const oy = canvas.clientHeight - h - px * 3;
+      return { px, w, h, ox, oy };
+    }
+
+    function mouth() {
+      const { px, ox, oy } = geometry();
+      return { mx: ox + px * 1.2, my: oy + px * 7.5 };
+    }
+
+    function drawSprite(rows: string[], w: number, ox: number, oy: number, px: number, eyeDX: number, eyeDY: number) {
+      for (let y = 0; y < rows.length; y++) {
+        for (let x = 0; x < w; x++) {
+          const k = rows[y][x];
+          if (k === '.') continue;
+          let key = k;
+          let dx = 0;
+          let dy = 0;
+          if (k === 'p') {
+            // The pupil slides within the eye white toward the cursor.
+            dx = eyeDX;
+            dy = eyeDY;
+          }
+          if (blink > 0.35 && (k === 'e' || k === 'p')) key = 'b';
+          ctx!.fillStyle = C[key] || C.b;
+          ctx!.fillRect(ox + (x + dx) * px, oy + (y + dy) * px, px, px);
+        }
+      }
+    }
+
+    function draw() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const W = canvas.clientWidth;
+      const H = 200;
+      if (!W) return;
+      if (canvas.width !== Math.round(W * dpr)) {
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+      }
+      canvas.style.height = H + 'px';
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, W, H);
+
+      const { px, ox, oy } = geometry();
+      const bob = reduced ? 0 : Math.sin(t * 1.7) * 2;
+
+      // Flame first, so the dragon's head sits on top of its own breath.
+      for (const em of fire.embers) {
+        const [r, g, b, a] = emberColor(em.heat);
+        ctx!.fillStyle = `rgba(${r},${g},${b},${a})`;
+        const s = em.size * (0.6 + em.heat * 0.8);
+        ctx!.fillRect(em.x - s / 2, em.y - s / 2, s, s);
+      }
+
+      // Pupil offset: at most one pixel cell in each direction.
+      let edx = 0;
+      let edy = 0;
+      if (hasPointer) {
+        const { mx, my } = mouth();
+        edx = Math.max(-1, Math.min(1, (cx - mx) / 220));
+        edy = Math.max(-1, Math.min(1, (cy - my) / 160));
+      }
+
+      drawSprite(HEAD, HEAD_W, ox, oy + bob, px, edx, edy);
+      drawSprite(JAW, JAW_W, ox + px, oy + bob + HEAD.length * px - px * 1.5 + jaw * px * 1.8, px, 0, 0);
+    }
+
+    function breathe() {
+      ignite(fire, 0.85);
+      jaw = 1;
+    }
+
+    poke.addEventListener('click', breathe);
+    canvas.addEventListener('click', breathe);
+
+    addEventListener('pointermove', (e) => {
+      const r = canvas.getBoundingClientRect();
+      cx = e.clientX - r.left;
+      cy = e.clientY - r.top;
+      hasPointer = true;
+    });
+
+    let last = 0;
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      t += dt;
+
+      nextBlink -= dt;
+      if (nextBlink <= 0) {
+        blink = 1;
+        nextBlink = 2.5 + Math.random() * 4;
+      }
+      blink = Math.max(0, blink - dt * 7);
+
+      // Jaw snaps open to breathe, then eases shut.
+      const target = fire.breathing > 0 ? 1 : 0;
+      jaw += (target - jaw) * Math.min(1, dt * 8);
+
+      const { mx, my } = mouth();
+      stepFire(fire, FIRE_DEFAULTS, dt, mx, my);
+      draw();
+      requestAnimationFrame(frame);
+    }
+
+    if (reduced) {
+      draw();
+      addEventListener('resize', draw);
+      // Poking still works; it just renders a single settled puff.
+      poke.addEventListener('click', () => {
+        ignite(fire, 0.2);
+        for (let i = 0; i < 20; i++) {
+          const { mx, my } = mouth();
+          stepFire(fire, FIRE_DEFAULTS, 1 / 60, mx, my);
+        }
+        draw();
+      });
+    } else {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-hd]').forEach(initHero);
+</script>
+
+<style>
+  .hd {
+    position: relative;
+    margin-top: 4px;
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 10px;
+  }
+  .hd canvas {
+    width: 100%;
+    height: 200px;
+    display: block;
+    cursor: pointer;
+  }
+  .hd-poke {
+    position: absolute;
+    left: 0;
+    bottom: 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 7px 14px;
+    cursor: pointer;
+  }
+  .hd-poke:hover { color: var(--accent); border-color: var(--accent); }
+</style>

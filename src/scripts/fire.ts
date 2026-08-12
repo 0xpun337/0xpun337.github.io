@@ -1,0 +1,108 @@
+/** Flame particles for the hero dragon. DOM-free so it stays testable. */
+
+export interface Ember {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** Seconds lived so far. */
+  age: number;
+  life: number;
+  size: number;
+  /** 0..1, drives the hot-to-smoke colour ramp. */
+  heat: number;
+}
+
+export interface FireParams {
+  /** Embers per second while breathing. */
+  rate: number;
+  /** Horizontal speed, sprite-pixels/sec. Negative blows left. */
+  speed: number;
+  spread: number;
+  /** Upward drift, since hot gas rises. */
+  buoyancy: number;
+  maxEmbers: number;
+}
+
+export const FIRE_DEFAULTS: FireParams = {
+  rate: 140,
+  speed: -120,
+  spread: 26,
+  buoyancy: -18,
+  maxEmbers: 260,
+};
+
+export interface FireState {
+  embers: Ember[];
+  /** Seconds of breath left. */
+  breathing: number;
+  spawnCredit: number;
+}
+
+export function initFire(): FireState {
+  return { embers: [], breathing: 0, spawnCredit: 0 };
+}
+
+/** Start (or extend) a breath. */
+export function ignite(s: FireState, seconds = 0.9): void {
+  s.breathing = Math.max(s.breathing, seconds);
+}
+
+/** Advance by `dt` seconds from a mouth at (mx, my). Returns embers spawned. */
+export function stepFire(
+  s: FireState,
+  p: FireParams,
+  dt: number,
+  mx: number,
+  my: number,
+  rand: () => number = Math.random,
+): number {
+  let spawned = 0;
+
+  if (s.breathing > 0) {
+    s.breathing = Math.max(0, s.breathing - dt);
+    s.spawnCredit += p.rate * dt;
+    while (s.spawnCredit >= 1) {
+      s.spawnCredit -= 1;
+      if (s.embers.length >= p.maxEmbers) {
+        s.spawnCredit = 0;
+        break;
+      }
+      const spread = (rand() - 0.5) * p.spread;
+      s.embers.push({
+        x: mx,
+        y: my + (rand() - 0.5) * 3,
+        vx: p.speed * (0.6 + rand() * 0.7),
+        vy: spread,
+        age: 0,
+        life: 0.5 + rand() * 0.7,
+        size: 2 + rand() * 3.5,
+        heat: 1,
+      });
+      spawned++;
+    }
+  } else {
+    s.spawnCredit = 0;
+  }
+
+  for (const e of s.embers) {
+    e.age += dt;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt + p.buoyancy * dt * (e.age / e.life);
+    // Drag, so the jet slows into a lazy plume rather than flying forever.
+    e.vx *= 1 - Math.min(0.9, dt * 1.9);
+    e.heat = Math.max(0, 1 - e.age / e.life);
+  }
+
+  s.embers = s.embers.filter((e) => e.age < e.life);
+  return spawned;
+}
+
+/** Hot core → flame → ember → smoke. Returns [r,g,b,alpha]. */
+export function emberColor(heat: number): [number, number, number, number] {
+  const h = Math.max(0, Math.min(1, heat));
+  if (h > 0.72) return [255, 246, 214, h];           // white-hot core
+  if (h > 0.45) return [255, 176, 58, h];            // flame
+  if (h > 0.2) return [214, 78, 34, h * 0.95];       // cooling ember
+  return [120, 116, 120, h * 0.8];                   // smoke
+}

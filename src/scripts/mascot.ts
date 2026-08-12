@@ -1,35 +1,11 @@
-/** The mascot's brain and sprite data.
+/** The in-post mascot's brain.
  *
  *  DOM-free so the behaviour is testable: acts, chomping, belly fullness, and
- *  the block physics all live here. The component only draws what this says. */
+ *  the block physics all live here. Artwork comes from ./dragon-sprite. */
 
 export type Act = 'sleep' | 'watch' | 'devour' | 'sated';
 
-/** Pixel key: o outline · b body · h highlight · e eye white · p pupil ·
- *  t tooth · n nostril. Dot is transparent. Facing left. */
-export const HEAD = [
-  '........oooooo....',
-  '......oohhhhhhoo..',
-  '....oohhhhhhhhhho.',
-  '..oobbbbhhhhhhhho.',
-  '.obbbbbbbbhhhhhho.',
-  'obbeepbbbbbbhhhhho',
-  'obbeepbbbbbbbbbbbo',
-  'onbbbbbbbbbbbbbbo.',
-  'ottotototobbbbbbo.',
-  '.oooooooooooooooo.',
-];
-
-export const JAW = [
-  'oooooooooooooooo',
-  'obtbtbtbtbbbbbbo',
-  'obbbbbbbbbbbbbbo',
-  '.oobbbbbbbbbboo.',
-  '...oooooooooo...',
-];
-
-export const HEAD_W = 18;
-export const JAW_W = 16;
+export { HEAD, JAW, HEAD_W, JAW_W } from './dragon-sprite';
 
 export interface Block {
   /** Position in sprite-pixel space, relative to the mascot box. */
