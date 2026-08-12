@@ -1,0 +1,265 @@
+---
+import Figure from '../Figure.astro';
+
+interface Props {
+  label: string;
+  title: string;
+  caption: string;
+}
+
+const { label, title, caption } = Astro.props;
+---
+
+<Figure label={label} title={title}>
+  <canvas
+    data-runtime
+    height="270"
+    aria-label="Thread occupancy across three pools. With decrypt and parse offloaded to a pinned Rayon pool the async reactor stays nearly idle; moving that work onto the reactor saturates all of its threads and collapses throughput."
+  ></canvas>
+
+  <Fragment slot="controls">
+    <div class="controls">
+      <div class="ctl">
+        <div class="ctl-top"><span>Rayon threads</span><output data-out="rayon">6</output></div>
+        <input type="range" data-in="rayon" min="1" max="12" value="6" aria-label="Rayon thread count" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-top"><span>Reactor threads</span><output data-out="reactor">4</output></div>
+        <input type="range" data-in="reactor" min="1" max="12" value="4" aria-label="Reactor thread count" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-top"><span>Arrival rate</span><output data-out="arrival">30/s</output></div>
+        <input type="range" data-in="arrival" min="5" max="80" value="30" aria-label="Job arrival rate" />
+      </div>
+      <button class="btn btn-danger" type="button" data-cpu-toggle>Move CPU onto reactor</button>
+    </div>
+  </Fragment>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>Reactor busy</dt><dd data-r="reactor">0%</dd></div>
+      <div><dt>Rayon busy</dt><dd data-r="rayon">0%</dd></div>
+      <div><dt>Throughput</dt><dd data-r="tp">0/s</dd></div>
+      <div><dt>Mean latency</dt><dd data-r="lat">0 ms</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={caption} />
+</Figure>
+
+<script>
+  import {
+    DEFAULTS, initRuntime, laneFor, resync, stepRuntime, threadCount, utilisation,
+    type Lane, type RuntimeParams,
+  } from '../../scripts/runtime-map';
+
+  const HEIGHT = 270;
+
+  const LANES: { lane: Lane; label: string; note: string }[] = [
+    { lane: 'blocking', label: 'TOKIO BLOCKING', note: 'file reads — syscalls that block and return' },
+    { lane: 'reactor', label: 'TOKIO REACTOR', note: 'awaits, dispatch, the writer' },
+    { lane: 'rayon', label: 'RAYON PINNED', note: 'decrypt · parse · validate' },
+  ];
+
+  function initMap(canvas: HTMLCanvasElement) {
+    const root = canvas.closest('figure');
+    if (!root) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const input = (n: string) => root.querySelector<HTMLInputElement>(`[data-in="${n}"]`)!;
+    const out = (n: string) => root.querySelector<HTMLOutputElement>(`[data-out="${n}"]`)!;
+    const rd = (n: string) => root.querySelector<HTMLElement>(`[data-r="${n}"]`)!;
+    const cpuBtn = root.querySelector<HTMLButtonElement>('[data-cpu-toggle]')!;
+
+    let C: Record<string, string> = {};
+    const readTokens = () => {
+      const s = getComputedStyle(document.documentElement);
+      const g = (n: string) => s.getPropertyValue(n).trim();
+      C = {
+        io: g('--ch-io'), cpu: g('--ch-cpu'), db: g('--ch-db'),
+        stall: g('--ch-stall'), scan: g('--ch-scan'),
+        ink: g('--ink'), muted: g('--muted'),
+        rule: g('--rule'), ruleSoft: g('--rule-soft'), surf2: g('--surface-2'),
+        mono: getComputedStyle(document.body).getPropertyValue('--mono').trim(),
+      };
+    };
+    readTokens();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+    new MutationObserver(readTokens).observe(document.documentElement, {
+      attributes: true, attributeFilter: ['data-theme'],
+    });
+
+    const params: RuntimeParams = { ...DEFAULTS };
+    let state = initRuntime(params);
+
+    const sync = () => {
+      params.rayonThreads = +input('rayon').value;
+      params.reactorThreads = +input('reactor').value;
+      params.arrivalRate = +input('arrival').value;
+      out('rayon').textContent = String(params.rayonThreads);
+      out('reactor').textContent = String(params.reactorThreads);
+      out('arrival').textContent = params.arrivalRate + '/s';
+      resync(state, params);
+    };
+    (['rayon', 'reactor', 'arrival'] as const).forEach((n) =>
+      input(n).addEventListener('input', sync),
+    );
+    sync();
+
+    cpuBtn.addEventListener('click', () => {
+      params.cpuOnReactor = !params.cpuOnReactor;
+      cpuBtn.textContent = params.cpuOnReactor ? 'Move CPU back to Rayon' : 'Move CPU onto reactor';
+      cpuBtn.classList.toggle('btn-danger', !params.cpuOnReactor);
+      cpuBtn.classList.toggle('btn-active', params.cpuOnReactor);
+      // Reset the accumulators so utilisation reflects the new architecture
+      // rather than an average across both.
+      state = initRuntime(params);
+      resync(state, params);
+    });
+
+    const phaseColor = (phase: string) =>
+      phase === 'read' ? C.io : phase === 'cpu' ? C.cpu : C.db;
+
+    function draw() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const W = canvas.clientWidth;
+      if (!W) return;
+      if (canvas.width !== Math.round(W * dpr)) {
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(HEIGHT * dpr);
+      }
+      canvas.style.height = HEIGHT + 'px';
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, W, HEIGHT);
+
+      const labelW = Math.min(168, Math.max(120, W * 0.17));
+      const barW = 74;
+      const laneH = HEIGHT / 3;
+      const slotGap = 5;
+
+      LANES.forEach((L, li) => {
+        const y = li * laneH;
+        const slots = state.threads[L.lane];
+        const n = Math.max(1, slots.length);
+        const util = utilisation(state, L.lane, params);
+        const hot = L.lane === 'reactor' && util > 0.8;
+
+        ctx!.textAlign = 'left';
+        ctx!.fillStyle = hot ? C.stall : C.ink;
+        ctx!.font = `700 11px ${C.mono}`;
+        ctx!.fillText(`${L.label} · ${n}`, 0, y + 26);
+
+        ctx!.fillStyle = C.muted;
+        ctx!.font = `9.5px ${C.mono}`;
+        ctx!.fillText(L.note, 0, y + 42);
+
+        // Thread slots.
+        const trackX = labelW;
+        const trackW = W - labelW - barW - 16;
+        const slotW = Math.max(4, (trackW - slotGap * (n - 1)) / n);
+        const slotH = 26;
+        const sy = y + laneH / 2 - slotH / 2 + 2;
+
+        for (let i = 0; i < n; i++) {
+          const x = trackX + i * (slotW + slotGap);
+          const jobId = slots[i];
+          const job = jobId === null ? undefined : state.jobs.find((j) => j.id === jobId);
+
+          if (job) {
+            const col = phaseColor(job.phase);
+            ctx!.fillStyle = col;
+            ctx!.globalAlpha = 0.85;
+            ctx!.beginPath();
+            ctx!.roundRect(x, sy, slotW, slotH, 2);
+            ctx!.fill();
+            ctx!.globalAlpha = 1;
+
+            // Progress bar through the current phase.
+            const total = job.phase === 'read' ? 40 : job.phase === 'cpu' ? 120 : 8;
+            const done = Math.max(0, Math.min(1, 1 - job.left / total));
+            ctx!.fillStyle = C.surf2;
+            ctx!.globalAlpha = 0.45;
+            ctx!.fillRect(x + slotW * done, sy, slotW * (1 - done), slotH);
+            ctx!.globalAlpha = 1;
+          } else {
+            ctx!.strokeStyle = C.rule;
+            ctx!.lineWidth = 1;
+            ctx!.beginPath();
+            ctx!.roundRect(x + 0.5, sy + 0.5, slotW - 1, slotH - 1, 2);
+            ctx!.stroke();
+          }
+        }
+
+        // Utilisation bar.
+        const bx = W - barW;
+        ctx!.strokeStyle = C.ruleSoft;
+        ctx!.lineWidth = 1;
+        ctx!.strokeRect(bx + 0.5, sy + 0.5, barW - 1, slotH - 1);
+        ctx!.fillStyle = hot ? C.stall : C.muted;
+        ctx!.globalAlpha = 0.5;
+        ctx!.fillRect(bx + 1, sy + 1, (barW - 2) * util, slotH - 2);
+        ctx!.globalAlpha = 1;
+        ctx!.fillStyle = hot ? C.stall : C.ink;
+        ctx!.font = `700 10px ${C.mono}`;
+        ctx!.textAlign = 'center';
+        ctx!.fillText(Math.round(util * 100) + '%', bx + barW / 2, sy + slotH / 2 + 3.5);
+
+        if (li < LANES.length - 1) {
+          ctx!.strokeStyle = C.ruleSoft;
+          ctx!.beginPath();
+          ctx!.moveTo(0, y + laneH - 0.5);
+          ctx!.lineTo(W, y + laneH - 0.5);
+          ctx!.stroke();
+        }
+      });
+
+      // Mark where the CPU phase currently lives.
+      const cpuLane = laneFor('cpu', params);
+      const idx = LANES.findIndex((l) => l.lane === cpuLane);
+      if (idx >= 0) {
+        ctx!.fillStyle = params.cpuOnReactor ? C.stall : C.cpu;
+        ctx!.fillRect(0, idx * laneH + 8, 3, laneH - 16);
+      }
+    }
+
+    function report() {
+      const ru = utilisation(state, 'reactor', params);
+      const el = rd('reactor');
+      el.textContent = Math.round(ru * 100) + '%';
+      el.className = ru > 0.8 ? 'warn' : '';
+
+      rd('rayon').textContent = Math.round(utilisation(state, 'rayon', params) * 100) + '%';
+      rd('tp').textContent =
+        state.elapsed > 0 ? (state.completed / state.elapsed).toFixed(1) + '/s' : '0/s';
+      rd('lat').textContent =
+        state.completed > 0
+          ? Math.round(state.latencySum / state.completed) + ' ms'
+          : '— ms';
+    }
+
+    let last = 0;
+    function frame(now: number) {
+      if (!last) last = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      stepRuntime(state, params, dt);
+      draw();
+      report();
+      requestAnimationFrame(frame);
+    }
+
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      for (let i = 0; i < 900; i++) stepRuntime(state, params, 1 / 60);
+      draw();
+      report();
+      addEventListener('resize', draw);
+    } else {
+      requestAnimationFrame(frame);
+    }
+
+    void threadCount;
+  }
+
+  document.querySelectorAll<HTMLCanvasElement>('canvas[data-runtime]').forEach(initMap);
+</script>

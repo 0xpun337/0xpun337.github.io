@@ -327,6 +327,14 @@ input[type="range"]::-moz-range-thumb {
   align-self: end;
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn-danger { border-color: var(--ch-stall); color: var(--ch-stall); }
+.btn-danger:hover { border-color: var(--ch-stall); color: var(--ch-stall); }
+.btn-active {
+  background: var(--ch-stall);
+  border-color: var(--ch-stall);
+  color: var(--surface);
+}
+.btn-active:hover { color: var(--surface); border-color: var(--ch-stall); }
 
 .readout {
   display: grid;

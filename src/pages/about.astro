@@ -4,7 +4,7 @@ import Base from '../layouts/Base.astro';
 
 <Base
   title="About — 0xpun337"
-  description="Puneet Mishra. Rust, Linux, and databases under load."
+  description="Puneet Mishra. Systems engineering — Rust, C++, reverse engineering, and the layers underneath."
 >
   <article>
     <div class="wrap">
@@ -12,29 +12,33 @@ import Base from '../layouts/Base.astro';
         <p class="eyebrow">About</p>
         <h1>Puneet Mishra</h1>
         <p class="deck">
-          I write about the parts of systems work that don't fit in a commit message.
+          I work at the layer where the abstractions stop helping.
         </p>
 
         <p>
-          Most of what shows up here comes out of building high-throughput ingest
-          services in Rust — pipelines that decode binary protocol frames and load
-          them into PostgreSQL, at rates where every allocation and every syscall
-          starts to matter.
+          Rust and C++ mostly, plus protocol reverse engineering, and enough
+          frontend to build the tools I need. What holds it together isn't a
+          language or a domain — it's an interest in what the machine is
+          actually doing underneath whatever API you were handed.
         </p>
 
         <p>
-          The posts describe <strong>techniques</strong>, not products. Where a
-          technique came out of professional work, the engineering is the subject
-          and the business context is left out entirely. Every figure and every
-          benchmark on this site is reproduced on synthetic data generated for
-          that purpose, so the numbers are mine to publish.
+          That means the posts here jump around: a kernel syscall one week, a
+          binary wire format the next, a pathological allocation pattern after
+          that. If there's a through-line, it's that most performance problems
+          turn out to be someone accepting a default they never looked at.
         </p>
 
-        <p class="note"><b>Protocols</b>DLMS/COSEM appears throughout. It is a published open standard — IEC 62056 — so nothing about parsing it is anyone's secret.</p>
+        <p>
+          Everything on this site is written from code I've actually built and
+          shipped, and the figures are live — the simulations run in your
+          browser off the same logic the posts describe, not screenshots of
+          something that once worked.
+        </p>
 
         <p>
-          Find me on <a href="https://github.com/0xpun337">GitHub</a>, or subscribe
-          via <a href="/rss.xml">RSS</a>.
+          <a href="https://github.com/0xpun337">GitHub</a> ·
+          <a href="/rss.xml">RSS</a>
         </p>
       </div>
     </div>

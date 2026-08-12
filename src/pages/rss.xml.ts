@@ -10,7 +10,7 @@ export async function GET(context: APIContext) {
   return rss({
     title: '0xpun337 — systems engineering notes',
     description:
-      'Rust, Linux syscalls, and getting data into PostgreSQL faster than it wants to go.',
+      'Systems engineering — Rust, C++, reverse engineering, and the layers underneath.',
     site: context.site!,
     items: posts.map((p) => ({
       title: p.data.title,
