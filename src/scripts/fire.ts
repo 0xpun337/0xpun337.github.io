@@ -98,11 +98,17 @@ export function stepFire(
   return spawned;
 }
 
-/** Hot core → flame → ember → smoke. Returns [r,g,b,alpha]. */
+/** Blackbody-ish ramp: white-yellow core → yellow → orange → red → smoke.
+ *  More steps than strictly necessary, because the yellow-to-orange band is
+ *  what makes a flame read as fire rather than as orange confetti.
+ *  Returns [r,g,b,alpha]. */
 export function emberColor(heat: number): [number, number, number, number] {
   const h = Math.max(0, Math.min(1, heat));
-  if (h > 0.72) return [255, 246, 214, h];           // white-hot core
-  if (h > 0.45) return [255, 176, 58, h];            // flame
-  if (h > 0.2) return [214, 78, 34, h * 0.95];       // cooling ember
-  return [120, 116, 120, h * 0.8];                   // smoke
+  if (h > 0.86) return [255, 253, 228, h];           // white-yellow core
+  if (h > 0.68) return [255, 232, 120, h];           // bright yellow
+  if (h > 0.5) return [255, 186, 48, h];             // yellow-orange
+  if (h > 0.34) return [248, 138, 26, h];            // orange
+  if (h > 0.2) return [222, 88, 22, h * 0.97];       // deep orange
+  if (h > 0.09) return [166, 46, 20, h * 0.9];       // red ember
+  return [120, 116, 120, h * 0.75];                  // smoke
 }

@@ -1,0 +1,201 @@
+---
+import Figure from '../Figure.astro';
+
+interface Props {
+  label: string;
+  title: string;
+  caption: string;
+}
+
+const { label, title, caption } = Astro.props;
+---
+
+<Figure label={label} title={title}>
+  <div class="dw" data-dw>
+    <div class="dw-bar">
+      <button class="btn" type="button" data-prev>◀ prev</button>
+      <button class="btn" type="button" data-next>next entry ▶</button>
+      <span class="dw-pos" data-pos></span>
+    </div>
+
+    <div class="dw-bytes" data-bytes aria-live="polite"></div>
+
+    <table class="dw-fields">
+      <thead>
+        <tr><th>field</th><th>off</th><th>len</th><th>value</th><th>what it is</th></tr>
+      </thead>
+      <tbody data-fields></tbody>
+    </table>
+  </div>
+
+  <Fragment slot="readout">
+    <dl class="readout">
+      <div><dt>Entry</dt><dd data-r="name">—</dd></div>
+      <div><dt>d_reclen</dt><dd data-r="reclen">0</dd></div>
+      <div><dt>Next entry at</dt><dd data-r="next">0</dd></div>
+      <div><dt>stat() needed</dt><dd data-r="stat">no</dd></div>
+    </dl>
+  </Fragment>
+
+  <Fragment slot="caption" set:html={caption} />
+</Figure>
+
+<script>
+  import { buildDirentBuffer, statsRequired, DT_UNKNOWN, type Field } from '../../scripts/dirent';
+
+  function initWalker(root: HTMLElement) {
+    const buf = buildDirentBuffer();
+    const bytesEl = root.querySelector<HTMLElement>('[data-bytes]')!;
+    const fieldsEl = root.querySelector<HTMLElement>('[data-fields]')!;
+    const posEl = root.querySelector<HTMLElement>('[data-pos]')!;
+    const figure = root.closest('figure')!;
+    const rd = (n: string) => figure.querySelector<HTMLElement>(`[data-r="${n}"]`)!;
+
+    let idx = 0;
+    let hovered: Field | null = null;
+
+    function render() {
+      const entry = buf.entries[idx];
+
+      // Map every byte to the field that owns it, for the active entry only.
+      const roleAt = new Array<string>(buf.bytes.length).fill('');
+      const fieldAt = new Array<Field | null>(buf.bytes.length).fill(null);
+      for (const f of entry.fields) {
+        for (let i = f.offset; i < f.offset + f.length; i++) {
+          roleAt[i] = f.role;
+          fieldAt[i] = f;
+        }
+      }
+
+      bytesEl.innerHTML = '';
+      buf.bytes.forEach((b, i) => {
+        const inEntry = i >= entry.offset && i < entry.offset + entry.reclen;
+        const cell = document.createElement('span');
+        const role = roleAt[i];
+        const dim = hovered && fieldAt[i] !== hovered;
+        cell.className = `dwb${inEntry ? ` r-${role}` : ' out'}${dim ? ' dim' : ''}`;
+        cell.textContent = b.toString(16).padStart(2, '0');
+        cell.title = `offset ${i}${fieldAt[i] ? ` — ${fieldAt[i]!.name}` : ''}`;
+        if (inEntry && fieldAt[i]) {
+          cell.addEventListener('mouseenter', () => { hovered = fieldAt[i]; render(); });
+          cell.addEventListener('mouseleave', () => { hovered = null; render(); });
+        }
+        bytesEl.appendChild(cell);
+      });
+
+      fieldsEl.innerHTML = '';
+      for (const f of entry.fields) {
+        const tr = document.createElement('tr');
+        tr.className = `r-${f.role}${hovered === f ? ' on' : ''}`;
+        tr.innerHTML =
+          `<td class="fn">${f.name}</td>` +
+          `<td class="num">${f.offset}</td>` +
+          `<td class="num">${f.length}</td>` +
+          `<td class="fv">${f.value}</td>` +
+          `<td class="fd">${f.note}</td>`;
+        tr.addEventListener('mouseenter', () => { hovered = f; render(); });
+        tr.addEventListener('mouseleave', () => { hovered = null; render(); });
+        fieldsEl.appendChild(tr);
+      }
+
+      posEl.textContent = `entry ${idx + 1} of ${buf.entries.length} · buffer ${buf.bytes.length} bytes`;
+      rd('name').textContent = entry.name;
+      rd('reclen').textContent = String(entry.reclen);
+      rd('next').textContent = String(entry.offset + entry.reclen);
+      const needsStat = entry.dType === DT_UNKNOWN;
+      const s = rd('stat');
+      s.textContent = needsStat ? 'yes' : 'no';
+      s.className = needsStat ? 'warn' : '';
+    }
+
+    root.querySelector('[data-next]')!.addEventListener('click', () => {
+      idx = (idx + 1) % buf.entries.length;
+      render();
+    });
+    root.querySelector('[data-prev]')!.addEventListener('click', () => {
+      idx = (idx - 1 + buf.entries.length) % buf.entries.length;
+      render();
+    });
+
+    void statsRequired;
+    render();
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-dw]').forEach(initWalker);
+</script>
+
+<style is:global>
+  .dw { display: flex; flex-direction: column; gap: 14px; }
+
+  .dw-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dw-pos {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .dw-bytes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .dwb {
+    padding: 5px 6px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    color: var(--muted);
+    transition: opacity .12s linear;
+  }
+  .dwb.out { opacity: .28; }
+  .dwb.dim { opacity: .3; }
+
+  /* One colour per struct field, so the byte grid and the table agree. */
+  .dwb.r-ino,    .dw-fields tr.r-ino    .fn { color: var(--ch-a); }
+  .dwb.r-off,    .dw-fields tr.r-off    .fn { color: var(--ch-b); }
+  .dwb.r-reclen, .dw-fields tr.r-reclen .fn { color: var(--ch-alert); }
+  .dwb.r-type,   .dw-fields tr.r-type   .fn { color: var(--ch-c); }
+  .dwb.r-name,   .dw-fields tr.r-name   .fn { color: var(--ch-d); }
+  .dwb.r-pad,    .dw-fields tr.r-pad    .fn { color: var(--muted); }
+
+  .dwb.r-ino    { background: color-mix(in srgb, var(--ch-a) 20%, transparent); }
+  .dwb.r-off    { background: color-mix(in srgb, var(--ch-b) 20%, transparent); }
+  .dwb.r-reclen { background: color-mix(in srgb, var(--ch-alert) 30%, transparent); }
+  .dwb.r-type   { background: color-mix(in srgb, var(--ch-c) 26%, transparent); }
+  .dwb.r-name   { background: color-mix(in srgb, var(--ch-d) 20%, transparent); }
+  .dwb.r-pad    { background: var(--surface-2); }
+
+  .dw-fields {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .dw-fields th {
+    text-align: left;
+    font-size: 9.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+    padding: 0 10px 6px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .dw-fields td {
+    padding: 7px 10px 7px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  .dw-fields tr.on td { background: var(--surface-2); }
+  .dw-fields .fn { font-weight: 700; white-space: nowrap; }
+  .dw-fields .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dw-fields .fd { color: var(--muted); font-family: var(--serif); font-size: 13.5px; }
+
+  @media (max-width: 640px) {
+    .dw-fields .fd { display: none; }
+  }
+</style>

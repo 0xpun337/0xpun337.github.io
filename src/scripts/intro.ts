@@ -12,8 +12,16 @@ export const SCALE_STEPS = [1, 2, 3.2, 5, 7.5];
 const STEP_AT = [0, 0.08, 0.17, 0.27, 0.37];
 
 export const GROW_END = 0.46;
-export const ROAR_END = 0.66;
-export const EXIT_END = 1.12;
+/** The roar has to outlast the breath itself. The exit moves the dragon at
+ *  roughly two viewport-widths a second while embers travel at ~210px/s, so
+ *  if it is still breathing when it leaves it outruns its own flame and the
+ *  plume trails out behind it. Breathing must finish, and settle, first. */
+export const ROAR_END = 1.06;
+export const EXIT_END = 1.56;
+
+/** How long the breath itself lasts. The component uses this to ignite, and
+ *  the roar window is required to be longer — see the test. */
+export const BREATH_SECONDS = 0.5;
 
 export interface IntroState {
   t: number;

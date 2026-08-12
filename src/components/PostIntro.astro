@@ -14,7 +14,7 @@
 
 <script>
   import { HEAD, JAW, HEAD_W, JAW_W } from '../scripts/dragon-sprite';
-  import { initIntro, stepIntro, skipIntro } from '../scripts/intro';
+  import { initIntro, stepIntro, skipIntro, BREATH_SECONDS } from '../scripts/intro';
   import { initFire, ignite, stepFire, emberColor, FIRE_DEFAULTS } from '../scripts/fire';
 
   function initSplash(root: HTMLElement) {
@@ -52,7 +52,7 @@
     }
 
     // Belt and braces: whatever happens in the loop, the overlay goes away.
-    const failsafe = setTimeout(finish, 2600);
+    const failsafe = setTimeout(finish, 3200);
 
     root.hidden = false;
     // Hold the scroll only for the ~1s it plays, so the page can't jump under it.
@@ -119,7 +119,7 @@
       last = now;
 
       stepIntro(state, dt);
-      if (state.justRoared) ignite(fire, 0.55);
+      if (state.justRoared) ignite(fire, BREATH_SECONDS);
 
       const W = innerWidth;
       const H = innerHeight;

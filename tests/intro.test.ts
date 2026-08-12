@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   initIntro, stepIntro, skipIntro, SCALE_STEPS, EXIT_END,
+  GROW_END, ROAR_END, BREATH_SECONDS,
 } from '../src/scripts/intro';
 
 const play = (seconds: number, dt = 1 / 60) => {
@@ -73,9 +74,24 @@ describe('post-open dragon splash', () => {
     expect(s.phase).toBe('done');
   });
 
+  it('finishes breathing before it starts moving, so it cannot outrun its own flame', () => {
+    // The exit travels ~2 viewport-widths/sec; embers manage ~210px/s. If the
+    // dragon is still breathing when it leaves, the plume trails out behind it.
+    expect(ROAR_END - GROW_END).toBeGreaterThan(BREATH_SECONDS);
+  });
+
+  it('stays put while roaring — no drift before the fire is out', () => {
+    const s = initIntro();
+    while (s.t < ROAR_END - 0.01) {
+      stepIntro(s, 1 / 60);
+      if (s.phase === 'roar' || s.phase === 'grow') expect(s.x).toBe(0);
+    }
+  });
+
   it('flies left and fades on the way out', () => {
     const s = initIntro();
-    for (let i = 0; i < 60; i++) stepIntro(s, 1 / 60);
+    while (s.phase !== 'exit') stepIntro(s, 1 / 60);
+    for (let i = 0; i < 12; i++) stepIntro(s, 1 / 60);
     expect(s.x).toBeLessThan(0);
     const mid = s.overlay;
     for (let i = 0; i < 10; i++) stepIntro(s, 1 / 60);

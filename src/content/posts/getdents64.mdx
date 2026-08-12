@@ -1,0 +1,168 @@
+---
+title: getdents64 and the stat you never asked for
+deck: std::fs::read_dir allocates twice per entry and, on some filesystems, calls stat on every one. The syscall underneath does neither — and the kernel already told you what you needed.
+series: Push Pipeline
+part: 3
+partsTotal: 6
+published: 2026-08-14
+readingMinutes: 10
+tags: [Rust, Linux, Syscalls, Performance]
+---
+
+import DirentWalker from '../../components/figures/DirentWalker.astro';
+import MascotCue from '../../components/MascotCue.astro';
+
+Listing a directory in Rust looks like it costs nothing:
+
+```rust
+for entry in std::fs::read_dir(dir)? {
+    let entry = entry?;
+    if entry.file_type()?.is_file() {
+        jobs.push(entry.path());
+    }
+}
+```
+
+Three lines, and every one of them is doing more than it appears to. At a few hundred files nobody notices. At a directory that is polled continuously, forever, with tens of thousands of entries sitting in it, this loop becomes the thing you are actually paying for.
+
+## <span class="num">01</span> What that loop really costs
+
+**One `String` and one `PathBuf` per entry.** `read_dir` hands you an owned `DirEntry`. The name is copied out of the kernel's buffer into a fresh allocation, and `.path()` builds a second one by joining it onto the parent. Two allocations per file, every pass, thrown away immediately.
+
+**A `stat` per entry — sometimes.** This is the expensive one, and it is invisible. `entry.file_type()` is free on filesystems that report the type inline, and a full `statx` round-trip on ones that don't. You cannot tell which you have from the call site.
+
+<p class="note"><b>The tell</b>If a directory scan is slow on one deployment and fine on another with the same file count, this is usually why. The code is identical; the filesystem isn't.</p>
+
+**Iterator machinery you don't want.** Every entry arrives as a `Result` you have to unwrap, in a stream you can't pause and resume without keeping the iterator alive.
+
+That last one turned out to matter as much as the allocations, for reasons I'll get to.
+
+## <span class="num">02</span> Ask the kernel directly
+
+Underneath `read_dir` is one syscall, `getdents64`. It fills a buffer you provide with as many variable-length records as fit:
+
+```rust
+let fd = unsafe {
+    libc::open(
+        c_path.as_ptr(),
+        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+    )
+};
+
+let n = unsafe {
+    libc::syscall(
+        libc::SYS_getdents64,
+        fd as libc::c_long,
+        buf.as_mut_ptr() as *mut libc::c_void,
+        GETDENTS_BUF as libc::c_long,
+    )
+};
+```
+
+`O_DIRECTORY` makes the open fail rather than succeed strangely if the path isn't a directory. `O_CLOEXEC` is the one people forget: without it the descriptor survives into any child process you spawn, which is both a leak and a quiet way to hand a subprocess access it was never meant to have.
+
+<p class="note"><b>Set O_CLOEXEC at open time</b>Not afterwards with <code>fcntl</code>. Between the two calls another thread can fork, and the race is real rather than theoretical.</p>
+
+The buffer is 4 MB and reused for the life of the scan. One syscall returns thousands of entries, so the per-file syscall cost effectively disappears.
+
+## <span class="num">03</span> The record layout is the whole trick
+
+The kernel writes packed, variable-length records. There is no array, no index, no count — just bytes, and one field that tells you how far to jump.
+
+<DirentWalker
+  label="Fig. 3.1"
+  title="A real getdents64 buffer, entry by entry"
+  caption="Step through the entries. Every byte is coloured by the struct field that owns it — hover a byte or a table row to isolate that field. The one to watch is <b>d_reclen</b>: entries are variable-length, so it is the only thing that tells you where the next record starts. Note the last entry: the filesystem reported <b>DT_UNKNOWN</b>, and that single byte is the difference between a free answer and a stat."
+/>
+
+Walking it is a loop over three facts: `d_reclen` at offset 16 is the stride, `d_type` at offset 18 is the kind, and `d_name` starts at offset 19 and runs to a NUL.
+
+```rust
+let entry = unsafe { &*(self.buf.as_ptr().add(self.buf_pos) as *const RawDirent64) };
+let reclen = entry.d_reclen as usize;
+let d_type = entry.d_type;
+
+let name_start = self.buf_pos + 19;
+let name_end = name_start
+    + self.buf[name_start..self.buf_pos + reclen]
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(reclen.saturating_sub(19));
+
+self.buf_pos += reclen;
+```
+
+The NUL scan is bounded by `self.buf_pos + reclen` rather than by the buffer end. That bound is doing real work: a name that somehow lacked its terminator would otherwise run into the next record and return a name spanning two entries. Bound the search to the record, not to the buffer.
+
+**Nothing here allocates.** The name is a slice pointing into the buffer the kernel already filled. Callers that need to keep it copy it; callers that only need to match an extension never do.
+
+<p class="note"><b>Where the wins actually come from</b>Not the syscall count. It is the two allocations per entry that stop happening, and the stat that stops happening.</p>
+
+## <span class="num">04</span> `d_type` is the point
+
+The syscall is the famous part. `d_type` is the part that earns its keep:
+
+```rust
+let is_file = if d_type == DT_REG {
+    true
+} else if d_type == DT_UNKNOWN {
+    std::fs::metadata(&path).map(|m| m.is_file()).unwrap_or(false)
+} else {
+    false
+};
+```
+
+Most filesystems fill in `d_type` — ext4, XFS, tmpfs — so `DT_REG` answers "is this a regular file?" from a byte that is already in your buffer. **Zero syscalls.** Some filesystems, and some network mounts, report `DT_UNKNOWN`, and then you have no choice but to ask.
+
+Handling both is what makes this safe to deploy anywhere. Assuming `d_type` is always populated is a bug that will not show up on your laptop and will show up on someone's NFS mount. Assuming it's never populated throws away the entire optimisation.
+
+Step to the last entry in the figure above: it's `DT_UNKNOWN`, and the readout flips to `stat() needed: yes`. That's one byte deciding whether a file costs nothing or costs a syscall. <MascotCue act="watch" />
+
+## <span class="num">05</span> The part I didn't expect to matter
+
+The scanner does not return a directory listing. It returns *the next N jobs*, and then stops.
+
+```rust
+pub(crate) fn next_chunk_with_filter<F>(
+    &mut self,
+    config: &AppConfig,
+    chunk_size: usize,
+    mut should_skip: F,
+) -> io::Result<(Vec<FileJob>, ScanStats)>
+```
+
+The cursor — open fd, 4 MB buffer, and `buf_pos` partway through it — is held in a struct across calls. Ask for 64 jobs and it hands back 64, keeping its place *mid-buffer*. Ask again and it resumes exactly where it stopped, without re-reading anything.
+
+That's the piece that ties this back to the admission gate from [part 1](/writing/two-runtimes-one-pipeline/). The pipeline's budget is `queue_size - in_flight`, so what it needs from a scanner is "give me exactly this many files" — not "give me everything and I'll throttle downstream". A scanner that eagerly enumerates a 50,000-file directory has already spent the memory and the time before backpressure gets a say.
+
+<p class="note"><b>Why <code>read_dir</code> makes this awkward</b>You can keep the iterator alive across calls, but you inherit its allocations and its error-per-entry shape, and the borrow lives as long as the cursor. Owning the fd and the offset is simpler than owning someone else's iterator.</p>
+
+Multiple source directories round-robin: one chunk from each in turn, tracked by `next_directory_index`, with a `consecutive_misses` counter so an empty directory doesn't spin. No single directory can starve the others just by being enormous.
+
+## <span class="num">06</span> What the `unsafe` is buying, precisely
+
+There are three `unsafe` blocks and it's worth being exact about what each one assumes, because "it's fast" is not a justification.
+
+**The `open`** — an FFI call. The invariant is that the `CString` outlives the call, which it does.
+
+**The syscall** — writes into `buf`, which is a `Vec<u8>` sized `GETDENTS_BUF`, and the length passed is that same constant. The kernel cannot write past what we told it.
+
+**The cast to `&RawDirent64`** — the one that needs care. It assumes `buf_pos` is a valid record start, which holds because it only ever advances by `d_reclen`, and that the buffer holds kernel-written dirent data, which it does because nothing else writes to it.
+
+And the fd is closed in `Drop`:
+
+```rust
+impl Drop for GetdentsStream {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.fd) };
+    }
+}
+```
+
+Raw fds leak on every early return unless something owns them. RAII around the descriptor means the scanner can `?` freely — including out of the middle of a chunk — and never lose one.
+
+<p class="note"><b>The honest summary</b>This is a few dozen lines of <code>unsafe</code> in one struct with a safe interface. It is worth it here because the loop runs continuously against large directories. In a CLI that lists a folder once, <code>read_dir</code> is the right answer and this would be showing off.</p>
+
+---
+
+Next: hand-rolling PostgreSQL's COPY BINARY, and why the wire format beats both `INSERT` and text `COPY`.
